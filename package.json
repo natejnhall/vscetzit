@@ -1,0 +1,554 @@
+{
+  "name": "cetzit",
+  "publisher": "cetzit",
+  "type": "module",
+  "displayName": "cetzit",
+  "description": "TikZiT-style GUI for editing cetz/Typst figure files (.typ) in VS Code",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cetzit/cetzit.git"
+  },
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onLanguage:typst",
+    "onCustomEditor:cetzit.figureEditor",
+    "onCustomEditor:cetzit.stylesEditor"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "cetzit",
+      "properties": {
+        "cetzit.enableAnimations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable animations in the cetzit editor."
+        },
+        "cetzit.axisColor": {
+          "type": "string",
+          "default": "#8839ef",
+          "description": "Color of the main axes in the cetzit editor."
+        },
+        "cetzit.majorGridColor": {
+          "type": "string",
+          "default": "#cccccc",
+          "description": "Color of the major grid lines in the cetzit editor."
+        },
+        "cetzit.minorGridColor": {
+          "type": "string",
+          "default": "#eeeeee",
+          "description": "Color of the minor grid lines in the cetzit editor."
+        },
+        "cetzit.figureGlob": {
+          "type": "string",
+          "default": "**/figures/**/*.typ",
+          "description": "Workspace-relative glob used to detect figure files. Editor activates only for .typ files matching this pattern."
+        },
+        "cetzit.stylesFile": {
+          "type": "string",
+          "default": "styles.typ",
+          "description": "Workspace-relative path to the user-owned styles file."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "cetzit.openFigureEditor",
+        "title": "Open cetzit Figure Editor",
+        "category": "cetzit",
+        "when": "resourceExtname == .typ && activeCustomEditorId != cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.scaffoldProject",
+        "title": "Scaffold cetzit project (cetzit/lib.typ + styles.typ)",
+        "category": "cetzit"
+      },
+      {
+        "command": "cetzit.gui.cut",
+        "title": "Edit > Cut",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.copy",
+        "title": "Edit > Copy",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.paste",
+        "title": "Edit > Paste",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.delete",
+        "title": "Edit > Delete",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.moveLeft",
+        "title": "Edit > Move Nodes Left",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.moveRight",
+        "title": "Edit > Move Nodes Right",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.moveUp",
+        "title": "Edit > Move Nodes Up",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.moveDown",
+        "title": "Edit > Move Nodes Down",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.nudgeLeft",
+        "title": "Edit > Nudge Nodes Left",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.nudgeRight",
+        "title": "Edit > Nudge Nodes Right",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.nudgeUp",
+        "title": "Edit > Nudge Nodes Up",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.nudgeDown",
+        "title": "Edit > Nudge Nodes Down",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.joinPaths",
+        "title": "Edit > Join Paths",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.splitPaths",
+        "title": "Edit > Split Paths",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.mergeNodes",
+        "title": "Edit > Merge Nodes",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.reflectNodesHorizontally",
+        "title": "Edit > Reflect Nodes Horizontally",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.reflectNodesVertically",
+        "title": "Edit > Reflect Nodes Vertically",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.reverseEdges",
+        "title": "Edit > Reverse Edges",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.bringToFront",
+        "title": "Order > Bring to Front",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.sendToBack",
+        "title": "Order > Send to Back",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.bringForward",
+        "title": "Order > Bring Forward",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.sendBackward",
+        "title": "Order > Send Backward",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.selectAll",
+        "title": "Selection > Select All",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.deselectAll",
+        "title": "Selection > Deselect All",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.extendSelectionLeft",
+        "title": "Selection > Extend Selection Left",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.extendSelectionRight",
+        "title": "Selection > Extend Selection Right",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.extendSelectionUp",
+        "title": "Selection > Extend Selection Up",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.extendSelectionDown",
+        "title": "Selection > Extend Selection Down",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.selectTool",
+        "title": "Tools > Select Tool",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.nodeTool",
+        "title": "Tools > Node Tool",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.edgeTool",
+        "title": "Tools > Edge Tool",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.viewTikzSource",
+        "title": "View > Typst Source",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.toggleStylePanel",
+        "title": "View > Toggle Style Panel",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.zoomIn",
+        "title": "View > Zoom In",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.zoomOut",
+        "title": "View > Zoom Out",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.centerViewport",
+        "title": "View > Center Viewport",
+        "category": "cetzit",
+        "when": "activeCustomEditorId == cetzit.figureEditor"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "cetzit.openFigureEditor",
+        "key": "ctrl+alt+t",
+        "when": "resourceExtname == .typ && activeCustomEditorId != cetzit.figureEditor"
+      },
+      {
+        "command": "cetzit.gui.cut",
+        "key": "ctrl+x",
+        "mac": "cmd+x",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.copy",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.paste",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.delete",
+        "key": "delete",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.delete",
+        "key": "backspace",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.moveLeft",
+        "key": "ctrl+left",
+        "mac": "cmd+shift+left",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.moveRight",
+        "key": "ctrl+right",
+        "mac": "cmd+shift+right",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.moveUp",
+        "key": "ctrl+up",
+        "mac": "cmd+shift+up",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.moveDown",
+        "key": "ctrl+down",
+        "mac": "cmd+shift+down",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.nudgeLeft",
+        "key": "ctrl+shift+left",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.nudgeRight",
+        "key": "ctrl+shift+right",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.nudgeUp",
+        "key": "ctrl+shift+up",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.nudgeDown",
+        "key": "ctrl+shift+down",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.joinPaths",
+        "key": "ctrl+alt+p",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.splitPaths",
+        "key": "ctrl+alt+shift+p",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.mergeNodes",
+        "key": "ctrl+e",
+        "mac": "cmd+e",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.reflectNodesHorizontally",
+        "key": "alt+right",
+        "mac": "alt+h",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.reflectNodesVertically",
+        "key": "alt+down",
+        "mac": "alt+v",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.reverseEdges",
+        "key": "ctrl+/",
+        "mac": "cmd+/",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.bringToFront",
+        "key": "ctrl+]",
+        "mac": "cmd+]",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.sendToBack",
+        "key": "ctrl+[",
+        "mac": "cmd+[",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.bringForward",
+        "key": "ctrl+shift+]",
+        "mac": "cmd+shift+]",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.sendBackward",
+        "key": "ctrl+shift+[",
+        "mac": "cmd+shift+[",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.selectAll",
+        "key": "ctrl+a",
+        "mac": "cmd+a",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.deselectAll",
+        "key": "ctrl+d",
+        "mac": "cmd+d",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.extendSelectionLeft",
+        "key": "shift+left",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.extendSelectionRight",
+        "key": "shift+right",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.extendSelectionUp",
+        "key": "shift+up",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.extendSelectionDown",
+        "key": "shift+down",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.selectTool",
+        "key": "s",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.selectTool",
+        "key": "escape",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.nodeTool",
+        "key": "n",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.edgeTool",
+        "key": "e",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.viewTikzSource",
+        "key": "ctrl+alt+t",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.toggleStylePanel",
+        "key": "ctrl+alt+s",
+        "mac": "cmd+option+s",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.zoomIn",
+        "key": "=",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.zoomOut",
+        "key": "-",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      },
+      {
+        "command": "cetzit.gui.centerViewport",
+        "key": "0",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "cetzit.figureEditor",
+        "displayName": "cetzit Figure Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/figures/**/*.typ"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "cetzit.stylesEditor",
+        "displayName": "cetzit Styles Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/styles.typ"
+          }
+        ],
+        "priority": "option"
+      }
+    ]
+  },
+  "scripts": {
+    "watch": "concurrently \"vite build --mode webview --watch\" \"vite build --mode extension --watch\"",
+    "watch-webview": "vite build --mode webview --watch",
+    "watch-extension": "vite build --mode extension --watch",
+    "build": "vite build --mode webview && vite build --mode extension",
+    "build-webview": "vite build --mode webview",
+    "build-extension": "vite build --mode extension",
+    "lint": "tsc && eslint .",
+    "package": "rm -r -f dist && vite build --mode webview && vite build --mode extension && vsce package"
+  },
+  "dependencies": {
+    "@preact/preset-vite": "^2.10.3",
+    "monaco-editor": "^0.55.1",
+    "preact": "^10.28.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.3.0",
+    "@types/vscode": "^1.109.0",
+    "@vscode/vsce": "^3.7.1",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.0.1",
+    "globals": "^17.3.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.56.0",
+    "vite": "^7.3.1"
+  }
+}
