@@ -2,9 +2,26 @@
 //
 // Figure file shape (canonical, per CETZIT_LIB_CONTEXT.md):
 //
-//   #import "/cetzit/lib.typ": *
+//   #import "/cetzit.typ": *
 //   #import "/styles.typ": *
 //   #import "@preview/cetz:0.5.0"
+//
+//   #let fig1(scale: 1.0) = cetzit-render(
+//     scale: scale,
+//     cetz.canvas({
+//       diagram(
+//         nodes: (…),
+//         edges: (…),
+//       )
+//     }),
+//   )
+//
+// The figure file binds a function whose name matches the file's basename
+// (sanitised to a valid Typst identifier). Users import it from main.typ and
+// invoke with an optional `scale` (overloaded: ratio, number, or length).
+// The parser only seeks the inner `diagram(` call — and requires an
+// identifier boundary in front of it so matches inside larger identifiers
+// like `cetzit-diagram(` aren't treated as the diagram args.
 //
 //   #align(center, cetz.canvas({
 //     diagram(
@@ -396,12 +413,20 @@ function parseDictLiteral(s: string): Map<string, string> | undefined {
 
 // Drives the cursor through the figure file's preamble and lands at the `diagram(`
 // call. Throws a ParseError if it can't find one.
+//
+// We require the match to be at an *identifier boundary* — i.e. the character
+// before `diagram` must not itself be part of an identifier. This rules out
+// false matches inside larger identifiers like `cetzit-diagram(` (the
+// previous emitted wrapper) or `my-diagram(` (a user-supplied name).
 function seekDiagramCall(cur: Cursor) {
   cur.skipTrivia();
   while (!cur.done) {
     if (cur.startsWith("diagram(")) {
-      cur.advance("diagram".length);
-      return;
+      const prev = cur.pos > 0 ? cur.src[cur.pos - 1] : "";
+      if (prev === "" || !/[a-zA-Z0-9_-]/.test(prev)) {
+        cur.advance("diagram".length);
+        return;
+      }
     }
     cur.advance();
   }

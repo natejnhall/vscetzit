@@ -136,7 +136,7 @@ export function computeControlPoints(
   const dx = c2.x - c1.x;
   const dy = c2.y - c1.y;
 
-  // Control-point distance = looseness * |source→target| / 3, matching lib.typ.
+  // Control-point distance = looseness * |source→target| / 3, matching cetzit.typ.
   // For self-loops we ignore this weight and use loop-size directly.
   let weight: number;
   const looseness = edgeData.propertyFloat("looseness");
@@ -149,7 +149,7 @@ export function computeControlPoints(
 
   if (edgeData.isSelfLoop) {
     // Self-loop: a teardrop above the node by default. Convention matches
-    // lib.typ: loop-angle is the bisector, loop-spread the aperture (positive =
+    // cetzit.typ: loop-angle is the bisector, loop-spread the aperture (positive =
     // CW traversal, control points splay symmetrically around the bisector).
     const loopAngleDeg = edgeData.propertyFloat("loop-angle") ?? 90;
     const loopSpreadDeg = edgeData.propertyFloat("loop-spread") ?? 90;
@@ -164,7 +164,7 @@ export function computeControlPoints(
     const bend = edgeData.bend;
     if (bend !== 0) {
       // Cetzit convention: positive bend = CCW pivot of outAngle relative to
-      // the source→target bearing. Mirrors lib.typ exactly.
+      // the source→target bearing. Mirrors cetzit.typ exactly.
       const bendRadians = (bend * Math.PI) / 180;
       const angle = Math.atan2(dy, dx);
       outAngle = angle + bendRadians;

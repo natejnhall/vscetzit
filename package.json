@@ -47,13 +47,18 @@
         },
         "cetzit.figureGlob": {
           "type": "string",
-          "default": "**/figures/**/*.typ",
-          "description": "Workspace-relative glob used to detect figure files. Editor activates only for .typ files matching this pattern."
+          "default": "**/figures/**/[!_]*.typ",
+          "description": "Workspace-relative glob used to detect figure files. Editor activates only for .typ files matching this pattern. Files starting with `_` are excluded by default so the auto-maintained barrel (`figures/_all.typ`) and any other tooling-managed files aren't treated as figures."
         },
         "cetzit.stylesFile": {
           "type": "string",
           "default": "styles.typ",
           "description": "Workspace-relative path to the user-owned styles file."
+        },
+        "cetzit.barrelFile": {
+          "type": "string",
+          "default": "figures/_all.typ",
+          "description": "Workspace-relative path to the auto-maintained figure barrel file. It re-exports every figure function in its directory so main.typ can import them all in one line. Set to an empty string to disable."
         }
       }
     },
@@ -66,7 +71,7 @@
       },
       {
         "command": "cetzit.scaffoldProject",
-        "title": "Scaffold cetzit project (cetzit/lib.typ + styles.typ)",
+        "title": "Scaffold cetzit project (cetzit.typ + styles.typ)",
         "category": "cetzit"
       },
       {
@@ -507,7 +512,7 @@
         "displayName": "cetzit Figure Editor",
         "selector": [
           {
-            "filenamePattern": "**/figures/**/*.typ"
+            "filenamePattern": "**/figures/**/[!_]*.typ"
           }
         ],
         "priority": "default"

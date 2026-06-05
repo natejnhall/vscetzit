@@ -2,7 +2,7 @@
 
 A VS Code extension that brings a TikZiT-style graphical editor to Typst figure
 files, emitting CeTZ-based `.typ` source through a small runtime library
-(`cetzit/lib.typ`). Forked from [tikzit/vstikzit](https://github.com/tikzit/vstikzit);
+(`cetzit.typ`). Forked from [tikzit/vstikzit](https://github.com/tikzit/vstikzit);
 the GUI shell is largely preserved, but the file format, parser, emitter, and
 symbol palette have been rewritten for the Typst + CeTZ ecosystem.
 
@@ -14,7 +14,9 @@ symbol palette have been rewritten for the Typst + CeTZ ecosystem.
   block that calls `diagram(nodes: (...), edges: (...))`).
 - Picks up node and edge styles from a user-owned `styles.typ` file at the
   workspace root.
-- Scaffolds `cetzit/lib.typ` and `styles.typ` into the workspace on first open
+- `cetzit.typ` (the runtime library) is supplied by the user — download it
+  from the distribution and place it at the workspace root alongside
+  `main.typ`. `styles.typ` is scaffolded by the editor on first figure open
   (or via a command — see *Quickstart*).
 - Approximates the figure on an SVG canvas inside VS Code; Tinymist's live
   preview is the authoritative render.
@@ -27,31 +29,37 @@ npm run build   # produces dist/cetzit_vscode.{js,css} and dist/extension.js
 ```
 
 Then open this folder in VS Code and press **F5** to launch an Extension
-Development Host. In the dev host, open any folder, create a
-`figures/fig1.typ`, click it in the explorer, and the cetzit editor opens.
+Development Host. In the dev host, open any folder that contains both a
+`cetzit.typ` at the root (the runtime — copy it from this extension or the
+distribution) and a `figures/fig1.typ` to edit. Click `fig1.typ` in the
+explorer and the cetzit editor opens.
 
 If the editor doesn't appear automatically, right-click the file → **Reopen
 Editor With…** → "cetzit Figure Editor".
 
-The first time a figure opens, the extension writes `cetzit/lib.typ` and
-`styles.typ` into the workspace root. To pull in an updated `lib.typ` later,
-run **"cetzit: Scaffold cetzit project (cetzit/lib.typ + styles.typ)"** from
-the command palette — that overwrites the runtime library but never touches
-the user-owned `styles.typ`.
+`styles.typ` is auto-created at the workspace root on first figure open if
+absent. To drop a fresh copy of the runtime library into a workspace, run
+**"cetzit: Scaffold cetzit project (cetzit.typ + styles.typ)"** from the
+command palette — that copies the bundled `cetzit.typ` (overwriting any
+existing one) and creates `styles.typ` if missing. The user-owned
+`styles.typ` is never overwritten if it already exists.
 
 ## File layout
 
 ```
-projmain/
-├── cetzit/lib.typ            runtime library scaffolded into workspaces
+vscetzit/
+├── cetzit.typ            runtime library bundled with the extension
 ├── src/
-│   ├── extension/            VS Code-side: custom editor providers, scaffolder
-│   ├── gui/                  Preact UI: canvas, style panel, editors
-│   └── lib/                  format-agnostic core: Graph, parser, emitter, …
-├── images/                   icons used by the GUI toolbar
-├── package.json              extension manifest + scripts
-└── vite.config.ts            build modes: webview, extension, browser
+│   ├── extension/        VS Code-side: custom editor providers, scaffolder
+│   ├── gui/              Preact UI: canvas, style panel, editors
+│   └── lib/              format-agnostic core: Graph, parser, emitter, …
+├── images/               icons used by the GUI toolbar
+├── package.json          extension manifest + scripts
+└── vite.config.ts        build modes: webview, extension, browser
 ```
+
+Users place a copy of `cetzit.typ` at the root of their own typst project
+(alongside `main.typ`).
 
 ## Open improvements
 
@@ -64,14 +72,14 @@ tackle them:
   `label-fill`, `loop-*` defaults for edges) require hand-editing
   `styles.typ`. Surface them in the editor with appropriate widgets
   (length sliders, color pickers, dropdowns).
-- **GUI support for polygon and pill shapes.** `lib.typ` now renders both
+- **GUI support for polygon and pill shapes.** `cetzit.typ` now renders both
   correctly, but the GUI canvas falls back to a square approximation for
   any non-circle shape (`Node.tsx` and `curve.ts`). Render pills as
   rounded rectangles whose width grows with the label, and regular polygons
   using `polygon` SVG primitives keyed on `sides`.
-- **Directed edges.** `lib.typ` currently emits undirected lines/curves and
+- **Directed edges.** `cetzit.typ` currently emits undirected lines/curves and
   the GUI hides the arrow-tip controls. Add `mark-end` / `mark-start` to the
-  edge style schema in `lib.typ` (delegating to CeTZ's mark API), surface
+  edge style schema in `cetzit.typ` (delegating to CeTZ's mark API), surface
   arrow-tip selectors in the GUI's edge style editor, and re-enable the
   `arrowHead`/`arrowTail` rendering paths in `Edge.tsx`.
 - **Typst symbol rendering in the GUI canvas.** Today the GUI approximates

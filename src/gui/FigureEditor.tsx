@@ -20,6 +20,9 @@ interface FigureEditorContent {
   document: string;
   styleFile: string;
   styles: string;
+  // Sanitised file basename used as the emitter's `#let <name>(scale, align)`
+  // identifier. Optional for backwards-compat — falls back to a generic name.
+  documentName?: string;
 }
 
 interface FigureEditorProps {
@@ -199,13 +202,19 @@ const FigureEditor = ({ initialContent }: FigureEditorProps) => {
     document.getElementById("graph-editor")?.focus();
   };
 
+  // The figure file emits a function named after its file basename so the
+  // user can `#import "figures/foo.typ": *` and call `#foo()` from main.typ.
+  // The funcName is computed by the extension and threaded through
+  // initialContent; we fall back to a generic identifier if it's missing.
+  const funcName = initialContent.documentName ?? "figure-content";
+
   // handle a graph change from the graph editor. "commit" says the document should be updated
   // and an undo step registered.
   const handleGraphChange = (g: Graph, commit: boolean) => {
     setGraph(g);
 
     if (commit) {
-      const value = g.tikz();
+      const value = g.cetzit(funcName);
       updateFromGui(value);
     }
   };
@@ -226,13 +235,13 @@ const FigureEditor = ({ initialContent }: FigureEditorProps) => {
     let position = { line: 0, column: 0 };
     if (selectedNodes.size > 0) {
       const [node] = selectedNodes;
-      const pos = graph.tikzWithPosition(node, undefined)[1]!;
+      const pos = graph.cetzitWithPosition(node, undefined, funcName)[1]!;
       if (pos !== undefined) {
         position = pos;
       }
     } else if (selectedEdges.size > 0) {
       const [edge] = selectedEdges;
-      const pos = graph.tikzWithPosition(undefined, edge)[1]!;
+      const pos = graph.cetzitWithPosition(undefined, edge, funcName)[1]!;
       if (pos !== undefined) {
         position = pos;
       }

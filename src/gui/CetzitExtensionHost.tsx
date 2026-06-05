@@ -26,19 +26,22 @@ class CetzitExtensionHost extends CetzitHost {
       // console.log("Received message:", message);
       switch (message.type) {
         case "updateToGui": {
-          if (message.content && this.updateToGuiHandler) {
+          // `message.content` may legitimately be the empty string when the
+          // user has undone all the way back to a blank document — accept
+          // any defined string, not just truthy ones.
+          if (message.content !== undefined && this.updateToGuiHandler) {
             this.updateToGuiHandler(message.content);
           }
           break;
         }
         case "tikzStylesContent": {
-          if (message.content && this.tikzStylesUpdatedHandler) {
+          if (message.content !== undefined && this.tikzStylesUpdatedHandler) {
             this.tikzStylesUpdatedHandler(message.content.filename, message.content.source);
           }
           break;
         }
         case "command": {
-          if (message.content && this.commandHandler) {
+          if (message.content !== undefined && this.commandHandler) {
             this.commandHandler(message.content);
           }
           break;

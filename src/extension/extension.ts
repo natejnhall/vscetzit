@@ -4,7 +4,7 @@ import {
   CetzitFigureEditorProvider,
   CetzitStylesEditorProvider,
 } from "./editors";
-import { scaffoldProject } from "./scaffold";
+import { scaffoldProject, setupBarrelWatcher } from "./scaffold";
 
 function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -38,6 +38,9 @@ function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("cetzit.scaffoldProject", () => scaffoldProject(context))
   );
+
+  // Keep the figure barrel up to date as figures are added or removed.
+  setupBarrelWatcher(context);
 
   // GUI commands are forwarded to the webview so the figure editor can handle
   // them (cut/copy/paste, tool selection, viewport actions, etc.).
