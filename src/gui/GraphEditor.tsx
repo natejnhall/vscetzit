@@ -340,7 +340,7 @@ const GraphEditor = ({
           const controlAngle = (Math.atan2(-dy2, dx2) * 180) / Math.PI;
 
           if (d.isSelfLoop) {
-            // lib.typ self-loop convention:
+            // cetzit.typ self-loop convention:
             //   cp1 (source-side, "out") angle = loop-angle + loop-spread/2
             //   cp2 (target-side, "in")  angle = loop-angle − loop-spread/2
             //   both control points sit at distance loop-size from the node.
@@ -350,7 +350,7 @@ const GraphEditor = ({
             //              un-dragged cp's angle is preserved exactly.
             //   • length — loop-size tracks the drag distance, so both cps
             //              update their radius together (length of one =
-            //              length of both, since lib.typ shares one radius).
+            //              length of both, since cetzit.typ shares one radius).
             //
             // We snap the *cp angle*, not loop-angle/loop-spread, so the
             // rounding lands cleanly on the dragged side and leaves the
@@ -381,7 +381,7 @@ const GraphEditor = ({
               .setProperty("loop-spread", newSpread)
               .setProperty("loop-size", newSize);
           } else {
-            // Match lib.typ: control-point distance = looseness · |s→t| / 3.
+            // Match cetzit.typ: control-point distance = looseness · |s→t| / 3.
             let weight: number;
             if (baseDist !== 0) {
               weight = handleDist / baseDist;
@@ -558,27 +558,48 @@ const GraphEditor = ({
           }
         }
         break;
-      case "vertex":
-        {
-          // Pick a user-visible name that doesn't collide with anything in
-          // the current graph. We can't rely on the internal ID alone — the
-          // parser reassigns internal IDs from 0 on every reload, so an
-          // emitted fallback `n<id>` would clash with any existing name
-          // like "n8" once enough nodes get added.
-          const existingNames = new Set(
-            graph.nodes.map(n => n.property("name") ?? `n${n.id}`)
-          );
-          let k = graph.numNodes;
-          while (existingNames.has(`n${k}`)) k++;
-
-          const node = new NodeData()
-            .setId(graph.freshNodeId)
-            .setCoord(p1.snapToGrid(4))
-            .setProperty("style", currentNodeStyle)
-            .setProperty("name", `n${k}`);
-          updateGraph(graph.addNodeWithData(node), true);
+      case "vertex": {
+        // Double-click: the first click already placed a vertex (on its own
+        // pointer-up). On the second click, focus the label editor for the
+        // just-placed vertex instead of stacking a second one on top.
+        if (numClicks.current >= 2 && clickedNode !== undefined) {
+          updateSelection(new Set([clickedNode]), new Set());
+          toggleStylePanel(true);
+          setTimeout(() => {
+            const labelField = document.getElementById("label-field") as HTMLInputElement | null;
+            labelField?.focus();
+            labelField?.select();
+          }, 10);
+          break;
         }
+
+        // Click-and-drag in vertex mode is treated as a user mistake (they
+        // probably meant edge mode); do nothing on release. Right-click drag
+        // from a node still creates an edge via the smart-tool switch to the
+        // edge case, which fires before this branch runs.
+        if (uiState.mouseMoved) {
+          break;
+        }
+
+        // Pick a user-visible name that doesn't collide with anything in the
+        // current graph. We can't rely on the internal ID alone — the parser
+        // reassigns internal IDs from 0 on every reload, so an emitted
+        // fallback `n<id>` would clash with any existing name like "n8"
+        // once enough nodes get added.
+        const existingNames = new Set(
+          graph.nodes.map(n => n.property("name") ?? `n${n.id}`)
+        );
+        let k = graph.numNodes;
+        while (existingNames.has(`n${k}`)) k++;
+
+        const node = new NodeData()
+          .setId(graph.freshNodeId)
+          .setCoord(p1.snapToGrid(4))
+          .setProperty("style", currentNodeStyle)
+          .setProperty("name", `n${k}`);
+        updateGraph(graph.addNodeWithData(node), true);
         break;
+      }
       case "edge":
         if (uiState.edgeStartNode !== undefined && uiState.edgeEndNode !== undefined) {
           // Right-click on a node in select mode with no drag → open the

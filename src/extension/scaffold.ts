@@ -1,30 +1,67 @@
 import * as vscode from "vscode";
 import * as path from "path";
 
-// Scaffolds the cetzit runtime + a starter styles file into the workspace
-// when missing. The runtime ships with the extension under `cetzit/lib.typ`
-// at the extension root; we copy it to `<workspace>/cetzit/lib.typ` so the
-// figure file's `#import "/cetzit/lib.typ"` resolves.
+// Workspace scaffolding.
+//
+// The cetzit runtime library (`cetzit.typ`) is expected to live at the
+// workspace root alongside `main.typ`. Users obtain it out-of-band (download
+// from the distribution, copy from the extension bundle) and place it in the
+// project themselves. We do NOT auto-write it on figure open. The extension
+// still ships a bundled copy under `extensionUri/cetzit.typ` so the explicit
+// "Scaffold cetzit project" command can drop a fresh copy into the workspace
+// for users who want one.
+//
+// `styles.typ` is user-owned. For now it's auto-created on first figure open
+// if missing (a popup will replace this in a follow-up).
 
-const DEFAULT_STYLES = `// Auto-scaffolded by cetzit. Edit these named styles or add your own.
-// Each style is a Typst dict; the cetzit GUI reads named styles from this
-// file and writes them back when you edit them through the style editor.
+const DEFAULT_STYLES = `// styles.typ — user-owned style definitions for cetzit figures.
+//
+// Each style is a Typst dict bound with \`#let\`. Reference it from a figure
+// node or edge by its bare name (no quotes):
+//
+//   (name: "a", pos: (0, 0), style: my-style)
+//
+// Style fields (merged over the defaults in cetzit.typ; omit to inherit):
+//
+//   shape:           "pill" | "rectangle" | "circle" | "polygon" | "path"
+//   fill:            color   — e.g. rgb(221, 255, 221), black, none
+//   stroke:          stroke  — e.g. black + 1pt, none,
+//                              (paint: red, thickness: 0.6pt, dash: "dashed")
+//   size:            number  — cm; fixed size for circle, floor elsewhere
+//   min-width:       number  — cm; bounding-box width floor
+//   min-height:      number  — cm; bounding-box height floor
+//   inner-sep:       number  — cm; padding around the rendered label
+//   corner-radius:   number  — cm; for shape: "rectangle"
+//   sides:           integer — for shape: "polygon" (3 = triangle, 6 = hexagon)
+//   vertices:        array   — for shape: "path"; (x, y) tuples, any range
+//   label-fill:      color   — color of the label text
+//   unlabeled-style: dict    — overrides applied when the node has no label
+//
+// Edge styles use \`stroke\` (and, once implemented, \`mark-end\` / \`mark-start\`).
+//
+// Uncomment the examples below or define your own. The GUI's style panel
+// will list whatever it finds in this file.
 
-#let z-spider = (
-  shape: "pill",
-  fill: rgb(221, 255, 221),
-  stroke: black + 0.4pt,
-  min-width: 0.5,
-  min-height: 0.5,
-)
+// #let z-spider = (
+//   shape: "pill",
+//   fill: rgb(221, 255, 221),
+//   stroke: black + 0.4pt,
+//   min-width: 0.5,
+//   min-height: 0.5,
+//   unlabeled-style: (shape: "circle", size: 0.25),
+// )
 
-#let x-spider = (
-  shape: "pill",
-  fill: rgb(255, 221, 221),
-  stroke: black + 0.4pt,
-  min-width: 0.5,
-  min-height: 0.5,
-)
+// #let x-spider = (
+//   shape: "pill",
+//   fill: rgb(255, 221, 221),
+//   stroke: black + 0.4pt,
+//   min-width: 0.5,
+//   min-height: 0.5,
+// )
+
+// #let hadamard-edge = (
+//   stroke: (paint: blue, dash: "dashed"),
+// )
 `;
 
 async function fileExists(uri: vscode.Uri): Promise<boolean> {
@@ -42,39 +79,71 @@ function stylesUri(workspaceRoot: vscode.Uri): vscode.Uri {
   return vscode.Uri.file(path.join(workspaceRoot.fsPath, rel));
 }
 
-// Scaffolds missing files in the workspace. `lib.typ` is treated as a
-// vendored runtime owned by the extension — when `overwriteLib` is set we
-// replace any existing copy with the bundled one. `styles.typ` is user-owned
-// and never overwritten (only created if absent).
-export async function ensureProjectScaffold(
-  context: vscode.ExtensionContext,
-  workspaceRoot: vscode.Uri,
-  overwriteLib: boolean = false
+function libUri(workspaceRoot: vscode.Uri): vscode.Uri {
+  return vscode.Uri.file(path.join(workspaceRoot.fsPath, "cetzit.typ"));
+}
+
+function barrelRelative(): string {
+  const rel =
+    vscode.workspace.getConfiguration("cetzit").get<string>("barrelFile") ?? "figures/_all.typ";
+  return rel;
+}
+
+// Returns the URI of the barrel file, or undefined if the setting is empty
+// (the user has disabled the barrel feature).
+export function barrelUri(workspaceRoot: vscode.Uri): vscode.Uri | undefined {
+  const rel = barrelRelative();
+  if (!rel) return undefined;
+  return vscode.Uri.file(path.join(workspaceRoot.fsPath, rel));
+}
+
+// Converts a figure file's basename into a valid Typst identifier (used as
+// both the wrapper-function name in the figure file and the imported name in
+// the barrel). Mirrors the logic in editors.ts; exported so both call sites
+// share the same sanitisation.
+export function sanitizeFuncName(basename: string): string {
+  let name = basename.replace(/[^a-zA-Z0-9_-]/g, "-");
+  if (/^[0-9]/.test(name)) name = "f-" + name;
+  if (name === "") name = "figure-content";
+  return name;
+}
+
+// Session-scoped record of workspaces we've already prompted in this VS Code
+// session. Reset on extension reload so users always see the popup at least
+// once per session if their styles file goes missing.
+const promptedWorkspaces = new Set<string>();
+const promptedBarrelWorkspaces = new Set<string>();
+
+// Called from the figure editor on open. If the workspace already has a
+// styles file, no-op. Otherwise prompt the user with a Create/Cancel popup;
+// on Create, write the commented template. On Cancel (or dismissal) the
+// figure editor still opens but Tinymist will error against the missing
+// import until a styles file exists.
+export async function maybePromptForStylesFile(
+  _context: vscode.ExtensionContext,
+  workspaceRoot: vscode.Uri
 ): Promise<void> {
-  const libDestDir = vscode.Uri.file(path.join(workspaceRoot.fsPath, "cetzit"));
-  const libDest = vscode.Uri.file(path.join(workspaceRoot.fsPath, "cetzit", "lib.typ"));
   const styles = stylesUri(workspaceRoot);
+  if (await fileExists(styles)) return;
 
-  if (overwriteLib || !(await fileExists(libDest))) {
-    try {
-      await vscode.workspace.fs.createDirectory(libDestDir);
-    } catch {
-      // already exists
-    }
-    const libSource = vscode.Uri.joinPath(context.extensionUri, "cetzit", "lib.typ");
-    try {
-      const data = await vscode.workspace.fs.readFile(libSource);
-      await vscode.workspace.fs.writeFile(libDest, data);
-    } catch (e) {
-      vscode.window.showErrorMessage(`cetzit: failed to scaffold lib.typ — ${e}`);
-    }
-  }
+  const key = workspaceRoot.toString();
+  if (promptedWorkspaces.has(key)) return;
+  promptedWorkspaces.add(key);
 
-  if (!(await fileExists(styles))) {
+  const choice = await vscode.window.showInformationMessage(
+    `cetzit: no ${
+      vscode.workspace.getConfiguration("cetzit").get<string>("stylesFile") ?? "styles.typ"
+    } found in this workspace. Create one?`,
+    { modal: false },
+    "Create",
+    "Cancel"
+  );
+
+  if (choice === "Create") {
     try {
       await vscode.workspace.fs.writeFile(styles, Buffer.from(DEFAULT_STYLES, "utf8"));
     } catch (e) {
-      vscode.window.showErrorMessage(`cetzit: failed to scaffold styles file — ${e}`);
+      vscode.window.showErrorMessage(`cetzit: failed to create styles file — ${e}`);
     }
   }
 }
@@ -93,9 +162,10 @@ export async function readStylesFile(
   }
 }
 
-// Explicit "scaffold this project" command. Overwrites cetzit/lib.typ with
-// the bundled version so users can pull in runtime updates without manual
-// copying. styles.typ is left alone (user-owned).
+// Explicit "scaffold this project" command. Drops a fresh copy of cetzit.typ
+// at the workspace root (overwriting any existing copy), and silently creates
+// the commented styles template if absent (no popup — the user invoked this
+// command and clearly wants the files).
 export async function scaffoldProject(context: vscode.ExtensionContext): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
@@ -103,14 +173,167 @@ export async function scaffoldProject(context: vscode.ExtensionContext): Promise
     return;
   }
   const folder = folders[0].uri;
-  await ensureProjectScaffold(context, folder, /* overwriteLib */ true);
+  const libDest = libUri(folder);
+  const libSource = vscode.Uri.joinPath(context.extensionUri, "cetzit.typ");
+
+  try {
+    const data = await vscode.workspace.fs.readFile(libSource);
+    await vscode.workspace.fs.writeFile(libDest, data);
+  } catch (e) {
+    vscode.window.showErrorMessage(`cetzit: failed to copy cetzit.typ — ${e}`);
+    return;
+  }
+
+  const styles = stylesUri(folder);
+  const stylesCreated = !(await fileExists(styles));
+  if (stylesCreated) {
+    try {
+      await vscode.workspace.fs.writeFile(styles, Buffer.from(DEFAULT_STYLES, "utf8"));
+    } catch (e) {
+      vscode.window.showErrorMessage(`cetzit: failed to create styles file — ${e}`);
+    }
+  }
+
   vscode.window.showInformationMessage(
-    `cetzit: updated cetzit/lib.typ${
-      (await fileExists(stylesUri(folder)))
-        ? ""
-        : ` and created ${
+    `cetzit: wrote cetzit.typ${
+      stylesCreated
+        ? ` and created ${
             vscode.workspace.getConfiguration("cetzit").get<string>("stylesFile") ?? "styles.typ"
           }`
+        : ""
     } in ${folder.fsPath}`
   );
+}
+
+//----------------------------------------------------------------------
+// Figure barrel file
+//----------------------------------------------------------------------
+//
+// The barrel re-exports every figure function in its directory so users can
+// `#import "/figures/_all.typ": *` once in main.typ instead of importing each
+// figure separately. The cetzit extension auto-maintains it: a Create/Cancel
+// popup the first time a figure is opened in a workspace that lacks one, and
+// a workspace file watcher that regenerates the barrel whenever a figure is
+// added, removed, or renamed.
+
+// Lists every `*.typ` file in the barrel's directory, excluding the barrel
+// itself. Returns the basenames (without path), alphabetically sorted for
+// stable regeneration across runs. Returns an empty array if the directory
+// doesn't exist yet.
+async function listFigureFiles(barrel: vscode.Uri): Promise<string[]> {
+  const dir = vscode.Uri.file(path.dirname(barrel.fsPath));
+  const barrelName = path.basename(barrel.fsPath);
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(dir);
+    return entries
+      .filter(
+        ([name, type]) =>
+          type === vscode.FileType.File && name.endsWith(".typ") && name !== barrelName
+      )
+      .map(([name]) => name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+// Writes the barrel file based on whatever figures currently exist in its
+// directory. The barrel uses the same name-from-basename convention as the
+// figure emitter, so renaming a figure file requires opening + saving it in
+// the GUI for the new function name to land in the file.
+export async function regenerateBarrelFile(workspaceRoot: vscode.Uri): Promise<void> {
+  const barrel = barrelUri(workspaceRoot);
+  if (!barrel) return;
+
+  const figures = await listFigureFiles(barrel);
+
+  const lines: string[] = [
+    `// ${barrelRelative()} — auto-maintained by cetzit.`,
+    "//",
+    "// Re-exports every figure function in this directory so main.typ can",
+    "// import them all in one line:",
+    "//",
+    `//   #import "/${barrelRelative()}": *`,
+    "//",
+    "// Don't hand-edit — the cetzit extension regenerates this file when",
+    "// figures are added, removed, or renamed. Each figure's function name",
+    "// matches its filename (sanitised to a valid Typst identifier), so",
+    "// renaming a figure file requires re-saving it through the GUI for the",
+    "// new function name to land inside the file.",
+    "",
+  ];
+  for (const file of figures) {
+    const funcName = sanitizeFuncName(file.replace(/\.typ$/, ""));
+    lines.push(`#import "${file}": ${funcName}`);
+  }
+
+  const content = lines.join("\n") + "\n";
+  try {
+    await vscode.workspace.fs.writeFile(barrel, Buffer.from(content, "utf8"));
+  } catch (e) {
+    vscode.window.showErrorMessage(`cetzit: failed to regenerate barrel file — ${e}`);
+  }
+}
+
+// Called from the figure editor on open. If the barrel feature is disabled
+// (empty setting) or the barrel already exists, no-op. Otherwise prompt the
+// user with a Create/Cancel popup. On Create, the barrel gets generated from
+// whatever figures are currently in the directory.
+export async function maybePromptForBarrelFile(
+  _context: vscode.ExtensionContext,
+  workspaceRoot: vscode.Uri
+): Promise<void> {
+  const barrel = barrelUri(workspaceRoot);
+  if (!barrel) return;
+  if (await fileExists(barrel)) return;
+
+  const key = workspaceRoot.toString();
+  if (promptedBarrelWorkspaces.has(key)) return;
+  promptedBarrelWorkspaces.add(key);
+
+  const choice = await vscode.window.showInformationMessage(
+    `cetzit: create ${barrelRelative()} so main.typ can import every figure in one line?`,
+    { modal: false },
+    "Create",
+    "Cancel"
+  );
+
+  if (choice === "Create") {
+    await regenerateBarrelFile(workspaceRoot);
+  }
+}
+
+// Set up a workspace file watcher that regenerates the barrel whenever a
+// figure file is added or removed inside the directory the barrel lives in.
+// Renames fire as a delete + create pair, so both are covered. We only
+// regenerate if the barrel already exists — otherwise the user has either
+// dismissed the popup or disabled the feature, and we shouldn't bring the
+// file into being uninvited.
+export function setupBarrelWatcher(context: vscode.ExtensionContext): void {
+  const watcher = vscode.workspace.createFileSystemWatcher("**/*.typ");
+
+  const maybeRegenerate = async (uri: vscode.Uri) => {
+    const workspaceRoot = vscode.workspace.getWorkspaceFolder(uri)?.uri;
+    if (!workspaceRoot) return;
+    const barrel = barrelUri(workspaceRoot);
+    if (!barrel) return;
+
+    // Only care about files inside the barrel's own directory.
+    const barrelDir = path.dirname(barrel.fsPath);
+    if (path.dirname(uri.fsPath) !== barrelDir) return;
+
+    // Skip the barrel itself to avoid feedback loops on regeneration.
+    if (uri.fsPath === barrel.fsPath) return;
+
+    // Don't resurrect a barrel the user dismissed.
+    if (!(await fileExists(barrel))) return;
+
+    await regenerateBarrelFile(workspaceRoot);
+  };
+
+  watcher.onDidCreate(maybeRegenerate);
+  watcher.onDidDelete(maybeRegenerate);
+  // Content changes don't affect the barrel — only file presence does.
+
+  context.subscriptions.push(watcher);
 }

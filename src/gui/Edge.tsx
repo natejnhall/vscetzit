@@ -52,7 +52,7 @@ const Edge = ({
 
   // Cetzit MVP doesn't render arrowheads (edges are undirected). The
   // arrowhead computation and JSX blocks were dropped — they'll come back
-  // when lib.typ gains mark-end/mark-start support.
+  // when cetzit.typ gains mark-end/mark-start support.
   void tangent;
 
   const basicBendMode = data.basicBendMode;

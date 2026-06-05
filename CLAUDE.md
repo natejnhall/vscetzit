@@ -10,7 +10,7 @@ authoritative; if something becomes stale, fix it.
 VS Code extension that turns `.typ` figure files into a graph editor. The
 on-disk format is a tiny domain-specific Typst template that calls a
 `diagram(nodes: (...), edges: (...))` function from a runtime library at
-`cetzit/lib.typ`. The GUI is a Preact webview that round-trips the file
+`cetzit.typ`. The GUI is a Preact webview that round-trips the file
 through a hand-rolled parser and emitter.
 
 Forked from vstikzit (https://github.com/tikzit/vstikzit). Most of the GUI
@@ -23,7 +23,7 @@ activation, scaffolding) are cetzit-specific.
 Every figure file emitted by cetzit looks like:
 
 ```typst
-#import "/cetzit/lib.typ": *
+#import "/cetzit.typ": *
 #import "/styles.typ": *
 #import "@preview/cetz:0.5.0"
 
@@ -58,15 +58,19 @@ Critical invariants:
   `out-angle`, `in-angle`, `looseness`, `loop-angle`, `loop-spread`,
   `loop-size`. The emitter infers `curve` from which fields are populated
   (`bend → "bend"`, `in-angle/out-angle → "in-out"`, neither → omit so
-  lib.typ defaults to `"line"`, self-loops omit it because lib.typ
+  cetzit.typ defaults to `"line"`, self-loops omit it because cetzit.typ
   auto-detects `source == target`).
 
-## The runtime library (`cetzit/lib.typ`)
+## The runtime library (`cetzit.typ`)
 
-The user's workspace has its own copy, scaffolded by the extension on first
-figure-file open. The canonical version ships at the extension root. To
-push updates: run **"cetzit: Scaffold cetzit project…"** — that command
-overwrites `cetzit/lib.typ` but never touches `styles.typ`.
+The user is responsible for placing `cetzit.typ` at their workspace root
+(alongside `main.typ`). The extension does NOT auto-scaffold it on figure
+open — users download it from the distribution or copy it out of the
+extension bundle themselves. The canonical version ships at the extension
+root (`extensionUri/cetzit.typ`); the **"cetzit: Scaffold cetzit project…"**
+command drops a fresh copy into the current workspace (and creates
+`styles.typ` if absent — the user-owned styles file is never overwritten if
+it already exists).
 
 ### Public API
 
@@ -149,8 +153,9 @@ src/
 │   │                     forwarding to the webview
 │   ├── editors.ts        custom editor providers (figure + styles).
 │   │                     Drives webview ↔ document round-trip.
-│   └── scaffold.ts       writes cetzit/lib.typ + styles.typ on first
-│                         open; overwrites lib.typ on explicit command
+│   └── scaffold.ts       writes styles.typ on first open if absent;
+│                         the explicit scaffoldProject command also
+│                         copies a fresh cetzit.typ from the extension
 ├── gui/                  Preact webview (one bundle: cetzit_vscode.js)
 │   ├── CetzitExtensionHost.tsx  webview entry; bridges to VS Code via
 │   │                             postMessage
@@ -206,7 +211,7 @@ For values you'll re-emit, preserve the raw string.
 ### Bend sign convention
 
 Cetzit uses **positive bend = CCW pivot of outAngle from source→target
-bearing.** `lib.typ` implements `out-a = atan2(dy, dx) + bend` and
+bearing.** `cetzit.typ` implements `out-a = atan2(dy, dx) + bend` and
 `in-a = π + atan2(dy, dx) − bend`. The GUI's `curve.ts` matches. This is
 the opposite of vstikzit's inherited convention (where positive meant CW);
 the migration was made during the cetzit port and you may see old commit
@@ -247,7 +252,7 @@ The webview canvas isn't a Typst engine. Several things are approximate:
   for hit-testing and visual approximation. Pills look like rectangles;
   polygons look like rectangles. This is intentional for v1 and listed
   under "Open improvements" in the README.
-- **Sizing**: rect/pill node bodies in `lib.typ` use `context + measure`
+- **Sizing**: rect/pill node bodies in `cetzit.typ` use `context + measure`
   to compute their actual size from the rendered label. The canvas
   approximates with `min-width × min-height` and doesn't measure label
   glyph metrics.
@@ -288,7 +293,7 @@ new builds.
   polygon vertices from `sides`. Pills render as `rx="50%" ry="50%"` rects
   whose width grows with the label (approximate via character count
   rather than glyph measurement).
-- **Directed edges**: extend `default-edge-style` in `lib.typ` with
+- **Directed edges**: extend `default-edge-style` in `cetzit.typ` with
   `mark-end` / `mark-start` (`"arrow"` | `"flat"` | `none`), implement
   with `cetz.draw.mark`. In the GUI, re-enable arrowhead computation
   paths in `Edge.tsx` (currently commented out) and add a dropdown in the
@@ -308,7 +313,7 @@ new builds.
 - `Graph.tikz()` / `Graph.tikzWithPosition()` are legacy aliases that call
   the cetzit emitter. Don't grep for "tikz" assuming it produces TikZ
   source — it doesn't anywhere in this codebase.
-- The `default-style`/`default-edge-style` dicts in `lib.typ` are
+- The `default-style`/`default-edge-style` dicts in `cetzit.typ` are
   authoritative for runtime defaults. If you change them, update the
   CLAUDE.md table above too.
 - CSS variables in `gui/vscodevars.css` are still namespaced `--tikzit-*`

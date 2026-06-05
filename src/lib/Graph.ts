@@ -703,10 +703,10 @@ class Graph {
 
   // Infers an edge's `curve` mode from which shape keys are populated. The
   // GUI doesn't always set `curve` explicitly when it tweaks `bend` or
-  // `in-angle`/`out-angle`, so without this inference lib.typ falls through
+  // `in-angle`/`out-angle`, so without this inference cetzit.typ falls through
   // to its default `curve: "line"` branch and renders a straight line for
   // what should have been a bent one. Self-loops always render as loops in
-  // lib.typ regardless of `curve`.
+  // cetzit.typ regardless of `curve`.
   private inferCurve(d: EdgeData): string | undefined {
     const explicit = d.property("curve");
     if (explicit !== undefined && explicit !== "") {
@@ -780,34 +780,46 @@ class Graph {
 
   // Produces the canonical cetzit figure file. `node`/`edge` arguments select
   // a target whose source location should be returned (used by "view source").
+  // `funcName` is the identifier the figure binds to — derived from the file
+  // basename so users can import + call by file name, e.g.
+  //   `#import "figures/circuit.typ": *`
+  //   `#circuit(scale: 1.5, align: right)`
+  //
+  // The figure body delegates to `cetzit-render` (defined in cetzit.typ),
+  // which pins the internal font size to 11pt and wraps the cetz output with
+  // a Typst `scale` + `align` transform. See cetzit.typ for the overloaded
+  // `scale` parameter (ratio / number / length).
   public cetzitWithPosition(
     node?: number,
-    edge?: number
+    edge?: number,
+    funcName: string = "figure-content"
   ): [string, { line: number; column: number } | undefined] {
     let position: { line: number; column: number } | undefined = undefined;
 
     let result = "";
-    result += '#import "/cetzit/lib.typ": *\n';
+    result += '#import "/cetzit.typ": *\n';
     result += '#import "/styles.typ": *\n';
     result += '#import "@preview/cetz:0.5.0"\n';
     result += "\n";
-    result += "#align(center, cetz.canvas({\n";
-    result += "  diagram(\n";
-    result += "    nodes: (\n";
+    result += `#let ${funcName}(scale: 1.0) = cetzit-render(\n`;
+    result += "  scale: scale,\n";
+    result += "  cetz.canvas({\n";
+    result += "    diagram(\n";
+    result += "      nodes: (\n";
     for (const d of this.nodes.values()) {
-      result += `      ${this.formatNodeDict(d)},`;
+      result += `        ${this.formatNodeDict(d)},`;
       if (node === d.id) {
         const lines = result.split("\n");
         position = { line: lines.length - 1, column: lines[lines.length - 1].length };
       }
       result += "\n";
     }
-    result += "    ),\n";
-    result += "    edges: (\n";
+    result += "      ),\n";
+    result += "      edges: (\n";
     for (const pd of this.paths) {
       for (const e of pd.edges) {
         const d = this.edge(e)!;
-        result += `      ${this.formatEdgeDict(d)},`;
+        result += `        ${this.formatEdgeDict(d)},`;
         if (edge === d.id) {
           const lines = result.split("\n");
           position = { line: lines.length - 1, column: lines[lines.length - 1].length };
@@ -815,14 +827,15 @@ class Graph {
         result += "\n";
       }
     }
-    result += "    ),\n";
-    result += "  )\n";
-    result += "}))\n";
+    result += "      ),\n";
+    result += "    )\n";
+    result += "  }),\n";
+    result += ")\n";
     return [result, position];
   }
 
-  public cetzit(): string {
-    return this.cetzitWithPosition()[0];
+  public cetzit(funcName: string = "figure-content"): string {
+    return this.cetzitWithPosition(undefined, undefined, funcName)[0];
   }
 
   // Legacy aliases used by GUI plumbing copied from vstikzit. They emit the

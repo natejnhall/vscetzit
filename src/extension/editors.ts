@@ -1,6 +1,11 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import { ensureProjectScaffold, readStylesFile } from "./scaffold";
+import {
+  maybePromptForBarrelFile,
+  maybePromptForStylesFile,
+  readStylesFile,
+  sanitizeFuncName,
+} from "./scaffold";
 
 function currentUri(): vscode.Uri | undefined {
   const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
@@ -177,12 +182,17 @@ window.addEventListener('load', () => {
   }
 
   async updateFromGui(document: vscode.TextDocument, content: string): Promise<boolean> {
+    // Wrap in try/finally so a thrown applyEdit (e.g. document closed
+    // mid-edit) never leaves `isUpdatingFromGui` stuck at true — that would
+    // silently filter out all later TextDocument changes including Cmd-Z.
     this.isUpdatingFromGui = true;
-    const edit = new vscode.WorkspaceEdit();
-    edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0), content);
-    const result = await vscode.workspace.applyEdit(edit);
-    this.isUpdatingFromGui = false;
-    return result;
+    try {
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0), content);
+      return await vscode.workspace.applyEdit(edit);
+    } finally {
+      this.isUpdatingFromGui = false;
+    }
   }
 
   async setErrors(errors: { line: number; column: number; message: string }[]): Promise<void> {
@@ -268,7 +278,10 @@ class CetzitFigureEditorProvider
   protected async initialContent(document: vscode.TextDocument): Promise<string> {
     const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri;
     if (workspaceRoot) {
-      await ensureProjectScaffold(this.context, workspaceRoot);
+      // Fire-and-forget: the popups run in parallel with editor init so we
+      // don't block opening the figure if the user takes a moment to decide.
+      void maybePromptForStylesFile(this.context, workspaceRoot);
+      void maybePromptForBarrelFile(this.context, workspaceRoot);
     }
     const { filePath, content: styles } = workspaceRoot
       ? await readStylesFile(workspaceRoot)
@@ -278,6 +291,9 @@ class CetzitFigureEditorProvider
       styleFile: path.basename(filePath),
       styles,
       document: document.getText(),
+      documentName: sanitizeFuncName(
+        path.basename(document.uri.fsPath, path.extname(document.uri.fsPath))
+      ),
     };
     return JSON.stringify(content);
   }

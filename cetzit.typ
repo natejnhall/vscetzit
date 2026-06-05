@@ -2,6 +2,44 @@
 #import "@preview/cetz:0.5.0"
 
 //--------------------------
+// Figure rendering helper
+//--------------------------
+//
+// Emitted figure files bind a function `<basename>(scale)` that calls
+// `cetzit-render(...)` to wrap the cetz canvas. The figure body itself is
+// always laid out at 11pt body text; the user controls the rendered size
+// from main.typ.
+//
+// The wrapper function's `scale` parameter would shadow Typst's built-in
+// `scale` function inside the function body, so we save a module-level
+// reference here that the helper can reach unambiguously.
+#let _typst-scale = scale
+
+// Wraps a body of cetz drawing commands in the canonical render pipeline:
+//
+//   1. Pin internal font size to 11pt so node geometry and stroke widths
+//      stay consistent regardless of surrounding body text.
+//   2. Scale the result by the requested factor.
+//
+// `scale` is overloaded:
+//   • ratio  (e.g. `150%`)  — used directly as the visual scale factor.
+//   • number (e.g. `1.5`)    — treated as a ratio (1.5 → 150%).
+//   • length (e.g. `14pt`)   — interpreted as the target font size; the
+//     figure is scaled by `scale / 11pt`, so `scale: 22pt` renders the
+//     figure at twice its base size (since the internal layout is 11pt).
+#let cetzit-render(body, scale: 1.0) = {
+  set text(size: 11pt)
+  let factor = if type(scale) == length {
+    (scale / 11pt) * 100%
+  } else if type(scale) == ratio {
+    scale
+  } else {
+    scale * 100%
+  }
+  _typst-scale(factor, reflow: true, body)
+}
+
+//--------------------------
 // Nodes
 //--------------------------
 
@@ -272,20 +310,20 @@
 
 #let diagram(nodes: (), edges: ()) = {
   let pos = (:)
-for n in nodes {
-  pos = pos + ((n.name): n.pos)
-}
+  for n in nodes {
+    pos = pos + ((n.name): n.pos)
+  }
 
   // Layer 1: edges (drawn first, painted over)
   for e in edges {
-  edge(
-    e.source,
-    e.target,
-    positions: pos,
-    style: e.at("style", default: (:)),
-    shape: e.at("shape", default: (:)),
-  )
-}
+    edge(
+      e.source,
+      e.target,
+      positions: pos,
+      style: e.at("style", default: (:)),
+      shape: e.at("shape", default: (:)),
+    )
+  }
 
   // Layer 2: nodes (drawn second, occlude edge endpoints)
   for n in nodes {
