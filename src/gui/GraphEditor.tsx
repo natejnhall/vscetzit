@@ -100,6 +100,14 @@ const GraphEditor = ({
   // state) so neither key transition triggers a re-render.
   const spaceHeld = useRef<boolean>(false);
 
+  // If a panel text input (e.g. the label field) had focus when the user
+  // started a canvas gesture, we swallow the entire gesture: pointer-down
+  // blurs the input and focuses the SVG, then both pointer-move and
+  // pointer-up early-out so no tool action fires. This lets the user
+  // "click away" from a label edit without also placing a vertex / starting
+  // an edge / etc. Reset at the top of every pointer-down.
+  const swallowGesture = useRef<boolean>(false);
+
   // path selection is calculated from selected edges or nodes
   const selectedPaths = new Set(
     selectedEdges.size > 0
@@ -368,6 +376,22 @@ const GraphEditor = ({
       return;
     }
 
+    // If a side-panel text input had focus (typically the label field
+    // immediately after the user finished typing), treat this canvas
+    // click purely as "commit and exit edit": blur the input, move
+    // focus to the SVG, and swallow the gesture so no tool runs.
+    // Without this, the same click both commits the label *and* fires
+    // the active tool — placing a stray vertex in vertex mode, starting
+    // an edge in edge mode, etc. — which is almost never intended.
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+      active.blur();
+      event.currentTarget.focus();
+      swallowGesture.current = true;
+      return;
+    }
+    swallowGesture.current = false;
+
     // Focus the SVG element to enable keyboard events
     event.currentTarget.focus();
 
@@ -509,6 +533,12 @@ const GraphEditor = ({
       return;
     }
 
+    // The gesture started with a panel input focused (see pointer-down);
+    // ignore everything until the next pointer-down.
+    if (swallowGesture.current) {
+      return;
+    }
+
     if (uiState.mouseDownPos === undefined || !enabled) {
       return;
     }
@@ -598,6 +628,16 @@ const GraphEditor = ({
   const handlePointerUp = (event: TargetedPointerEvent<SVGSVGElement>) => {
     event.currentTarget.releasePointerCapture(event.pointerId);
     event.preventDefault();
+
+    // Click-off-the-label gesture (see pointer-down): swallow the whole
+    // event. Reset numClicks too — otherwise a real canvas click within
+    // the next 400ms would be mis-counted as the second tap of a
+    // double-click.
+    if (swallowGesture.current) {
+      swallowGesture.current = false;
+      numClicks.current = 0;
+      return;
+    }
 
     // handle double-clicks/taps manually, since we're using the pointer events API
     numClicks.current += 1;

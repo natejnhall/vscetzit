@@ -2,6 +2,32 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Canvas click after a label edit just commits the edit
+
+> new fix: if the label text box is currently selected (i.e. I just
+> finished typing a label) and I click on the canvas, nothing
+> should happen. (i.e. no matter which mode we are in, clicking off
+> of the label text box should behave as though we are in select
+> mode).
+
+- New `swallowGesture` ref in `GraphEditor`. At the top of
+  `handlePointerDown`, if `document.activeElement` is an
+  `HTMLInputElement`/`HTMLTextAreaElement`, the input is blurred,
+  focus is moved to the SVG, the ref is set, and we return early
+  — no `mouseDownPos`, no tool dispatch.
+- `handlePointerMove` and `handlePointerUp` both early-out on the
+  ref. Pointer-up also resets `numClicks.current = 0` and clears
+  the ref so the *next* canvas click (which now starts with the
+  SVG focused) gets the full tool treatment and isn't mis-counted
+  as the second tap of a double-click.
+- Why we needed this at all: pointer-down used to immediately call
+  `event.currentTarget.focus()`, which blurs the input — but it
+  did this in the same handler that goes on to place a vertex,
+  start an edge, toggle bezier mode, etc. So a click meant only
+  to leave the label field would simultaneously fire the active
+  tool. The check has to happen *before* the SVG-focus call,
+  since after it `document.activeElement` is already the SVG.
+
 ## Empty click in edge mode closes the CP interface
 
 > I should also be able to empty click in edge mode while a control
