@@ -2,6 +2,19 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Tighten double-click window from 400ms to 200ms
+
+> make the time between clicks required to count as a "double click"
+> shorter. Maybe cut it in half.
+
+- `numClicks.current` reset timer in `handlePointerUp` cut from
+  400ms to 200ms. Two intentionally separate clicks now have to
+  be much closer in time to be fused into a double-click; the
+  practical effect is that single-click actions (place vertex,
+  start edge) feel more responsive in their commit/finalise phase
+  because the editor isn't pessimistically waiting for a possible
+  second tap.
+
 ## Canvas click after a label edit just commits the edit
 
 > new fix: if the label text box is currently selected (i.e. I just

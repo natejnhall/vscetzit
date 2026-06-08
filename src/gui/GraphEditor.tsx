@@ -639,11 +639,14 @@ const GraphEditor = ({
       return;
     }
 
-    // handle double-clicks/taps manually, since we're using the pointer events API
+    // handle double-clicks/taps manually, since we're using the pointer
+    // events API. 200ms window — tight enough that two intentionally
+    // separate clicks don't get fused, but well above the ~60-100ms a
+    // deliberate double-click takes on most pointing devices.
     numClicks.current += 1;
     setTimeout(() => {
       numClicks.current = 0;
-    }, 400);
+    }, 200);
 
     if (!enabled) {
       return;
