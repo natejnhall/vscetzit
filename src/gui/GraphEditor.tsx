@@ -48,6 +48,14 @@ interface UIState {
   addEdgeLineStart?: Coord;
   addEdgeLineEnd?: Coord;
   highlightPath?: number;
+  // Shift + left-click is a pan candidate. Pointer-down captures the scroll
+  // offset, pointer-move uses the cursor delta to scroll the viewport, and
+  // pointer-up short-circuits the per-tool logic. A shift+click without
+  // movement falls through to whatever the tool would normally do (e.g.
+  // shift+click for multi-select in select mode).
+  panMode?: boolean;
+  panStartScrollLeft?: number;
+  panStartScrollTop?: number;
 }
 
 const uiStateReducer = (state: UIState, action: UIState | "reset"): UIState => {
@@ -335,6 +343,21 @@ const GraphEditor = ({
     )?.id;
     updateUIState({ mouseDownPos: p, draggingNodes: false });
 
+    // Shift + left-click is the pan gesture. Capture starting scroll
+    // position here; pointer-move scrolls the viewport against the cursor
+    // delta and pointer-up short-circuits the per-tool logic. We don't
+    // return early so that a shift+click without movement still falls
+    // through to the tool's normal handlers (e.g. shift+click multi-select
+    // in select mode).
+    if (event.button === 0 && event.getModifierState("Shift")) {
+      const viewport = document.getElementById("graph-editor-viewport")!;
+      updateUIState({
+        panMode: true,
+        panStartScrollLeft: viewport.scrollLeft,
+        panStartScrollTop: viewport.scrollTop,
+      });
+    }
+
     let currentTool = tool;
     // Right-click smart-tool switches:
     //   • select + node  → edge   (drag → connect; no-drag → label editor)
@@ -388,16 +411,19 @@ const GraphEditor = ({
             updateSelection(new Set(), new Set());
           }
 
-          // start rubber band selection
-          updateUIState({
-            showSelectionRect: true,
-            selectionRect: {
-              x: p.x,
-              y: p.y,
-              width: 0,
-              height: 0,
-            },
-          });
+          // Skip the rubber-band when shift is held — shift+drag is reserved
+          // for panning, and we don't want both gestures running at once.
+          if (!event.getModifierState("Shift")) {
+            updateUIState({
+              showSelectionRect: true,
+              selectionRect: {
+                x: p.x,
+                y: p.y,
+                width: 0,
+                height: 0,
+              },
+            });
+          }
         }
 
         break;
@@ -442,6 +468,15 @@ const GraphEditor = ({
     }
     const p = mousePositionToCoord(event);
     updateUIState({ mouseMoved: true });
+
+    // Shift-pan: scroll the viewport against the cursor delta and short-
+    // circuit the per-tool drag logic so nothing else fires concurrently.
+    if (uiState.panMode) {
+      const viewport = document.getElementById("graph-editor-viewport")!;
+      viewport.scrollLeft = (uiState.panStartScrollLeft ?? 0) - (p.x - uiState.mouseDownPos.x);
+      viewport.scrollTop = (uiState.panStartScrollTop ?? 0) - (p.y - uiState.mouseDownPos.y);
+      return;
+    }
 
     switch (tool) {
       case "select":
@@ -527,6 +562,21 @@ const GraphEditor = ({
     const clickedNode = graph.nodes.find(
       d => Math.abs(d.coord.x - p1.x) < 0.22 && Math.abs(d.coord.y - p1.y) < 0.22
     )?.id;
+
+    // Shift-pan release: skip the per-tool pointer-up logic entirely. The
+    // scroll has already happened in pointer-move; we just clean up. A
+    // shift+click without movement (panMode set but mouseMoved false) is
+    // intentionally let through so tool-specific shift+click semantics
+    // (e.g. multi-select toggle on a node) still execute.
+    if (uiState.panMode && uiState.mouseMoved) {
+      if (uiState.smartTool) {
+        setTool("select");
+      }
+      clickedEdge.current = undefined;
+      clickedControlPoint.current = undefined;
+      updateUIState("reset");
+      return;
+    }
 
     switch (tool) {
       case "select":
