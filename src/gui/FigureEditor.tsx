@@ -208,6 +208,20 @@ const FigureEditor = ({ initialContent }: FigureEditorProps) => {
   // initialContent; we fall back to a generic identifier if it's missing.
   const funcName = initialContent.documentName ?? "figure-content";
 
+  // Newly-created figure files start out empty. The barrel file already
+  // imports the figure's function by name (`#import "foo.typ": foo`), so an
+  // empty file means the import resolves to nothing and Tinymist errors
+  // until the user places a first node. Eagerly write the canonical empty
+  // template on first open so the function is defined from the start. We
+  // gate on truly empty (whitespace-only) input so we don't clobber any
+  // hand-written content the user may have started with.
+  useEffect(() => {
+    if (initialContent.document.trim() === "") {
+      host.updateFromGui(new Graph().cetzit(funcName));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // handle a graph change from the graph editor. "commit" says the document should be updated
   // and an undo step registered.
   const handleGraphChange = (g: Graph, commit: boolean) => {
