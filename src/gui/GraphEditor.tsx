@@ -699,7 +699,11 @@ const GraphEditor = ({
         const pastedData = await window.navigator.clipboard.readText();
         const parsed = parseFigure(pastedData);
         if (parsed.result !== undefined) {
-          let g = parsed.result;
+          // Pasted vertices come in label-free: copying carries data but not
+          // the user-typed text on each node. The user can re-label them as
+          // needed; otherwise duplicate labels would propagate every time
+          // they paste.
+          let g = parsed.result.mapNodeData(d => d.setLabel(""));
           const nodes = g.nodeIds;
           if (nodes.length !== 0) {
             const n = nodes[0];
