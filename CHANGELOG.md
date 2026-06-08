@@ -2,6 +2,52 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Spacebar + drag pans the canvas (and the half-speed bug)
+
+> The trackpad is great, add shift and drag as well for pan.
+>
+> The dragging is quite jittery and doesnt seem to be moving as fast
+> as my mouse, only half the distance. Is it only checking and
+> updating half as often as the rest of the program?
+>
+> Also, upon second thought, since shift-click does something
+> already, switch the gesture to spacebar-drag. Maybe this will also
+> fix the problem.
+
+- First pass used shift+drag and computed the pan delta in the
+  SVG-relative coordinate system returned by `mousePositionToCoord`.
+  That coordinate moves with the SVG: when we set `scrollLeft -= 50`,
+  the SVG shifts +50 in viewport coords, so the *next* mouse event at
+  the same screen position produces a `p` that already drifted by 50.
+  Diffing that against the captured `mouseDownPos` under-counted the
+  cursor delta by exactly the amount we'd just scrolled —
+  algebraically a 1:0.5 feedback ratio, which matches the "half
+  distance" symptom. The "jitter" is the same recurrence: the
+  recurrence δₙ + δₙ₋₁ = −Mₙ alternates each event between catching
+  up and stalling.
+- Fix: diff in viewport-absolute coordinates. Pointer-down now stores
+  `panStartClientX`/`panStartClientY` alongside the scroll offset,
+  and pointer-move computes `event.clientX - panStartClientX`
+  directly. `clientX`/`clientY` don't shift with our own scroll, so
+  the delta is the true cursor motion.
+- Switched the modifier from shift to spacebar. Shift+click is
+  already overloaded by every tool (multi-select toggle, endpoint
+  stickiness, etc.) so making it also a pan modifier was conflicting
+  with the existing gestures.
+- New `spaceHeld` ref in `GraphEditor`, plus a `useEffect` that
+  registers window keydown/keyup for `code === "Space"`. The
+  keydown is gated on the graph-editor element (or a descendant)
+  being the active element so pressing space while typing in the
+  style-panel label field still inserts a literal space.
+  preventDefault on keydown avoids the webview scrolling.
+- Pointer-down: `event.button === 0 && spaceHeld.current` enters
+  pan mode and stamps the four start values. Pointer-move:
+  early-out with the viewport-coord scroll update. Pointer-up:
+  early-out only if `mouseMoved` was set — a space+click without
+  drag still falls through to the tool's normal click semantics.
+- The rubber-band setup in the select-tool's empty-click branch is
+  suppressed when space is held, so the two gestures can't overlap.
+
 ## Exclude underscore-prefixed `.typ` files from the figure editor glob
 
 > Make sure `_all.typ` (and any other tooling-managed file with a

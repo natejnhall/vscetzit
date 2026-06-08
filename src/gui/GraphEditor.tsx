@@ -48,14 +48,18 @@ interface UIState {
   addEdgeLineStart?: Coord;
   addEdgeLineEnd?: Coord;
   highlightPath?: number;
-  // Shift + left-click is a pan candidate. Pointer-down captures the scroll
-  // offset, pointer-move uses the cursor delta to scroll the viewport, and
-  // pointer-up short-circuits the per-tool logic. A shift+click without
-  // movement falls through to whatever the tool would normally do (e.g.
-  // shift+click for multi-select in select mode).
+  // Spacebar + left-drag is the pan gesture. Pointer-down records the
+  // viewport scroll position and the cursor's viewport-absolute
+  // (clientX/clientY) position; pointer-move scrolls the viewport by the
+  // viewport-coord delta. We *must* diff in viewport space, not the
+  // SVG-relative `mousePositionToCoord` space — the SVG itself shifts in
+  // viewport coords as we scroll, so a SVG-relative diff feeds our own
+  // scroll back into the input and halves the apparent pan speed.
   panMode?: boolean;
   panStartScrollLeft?: number;
   panStartScrollTop?: number;
+  panStartClientX?: number;
+  panStartClientY?: number;
 }
 
 const uiStateReducer = (state: UIState, action: UIState | "reset"): UIState => {
@@ -89,6 +93,11 @@ const GraphEditor = ({
   // refs used to pass data from edge components to the graph editor
   const clickedEdge = useRef<number | undefined>(undefined);
   const clickedControlPoint = useRef<[number, 1 | 2] | undefined>(undefined);
+
+  // Tracks whether the spacebar is currently held; pointer-down checks this
+  // ref to decide whether the gesture should pan. We hold it in a ref (not
+  // state) so neither key transition triggers a re-render.
+  const spaceHeld = useRef<boolean>(false);
 
   // path selection is calculated from selected edges or nodes
   const selectedPaths = new Set(
@@ -133,8 +142,35 @@ const GraphEditor = ({
     });
 
     resizeObserver.observe(viewport);
+
+    // Track spacebar for pan gesture. We listen at the window level so the
+    // keydown fires regardless of which child element inside the graph
+    // editor has focus, but gate on the canvas being the active region so
+    // pressing space while typing in the style-panel label field still
+    // inserts a literal space.
+    const isCanvasActive = () => {
+      const el = document.getElementById("graph-editor");
+      if (!el) return false;
+      return document.activeElement === el || el.contains(document.activeElement);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && isCanvasActive()) {
+        e.preventDefault(); // avoid the webview scrolling on space
+        spaceHeld.current = true;
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        spaceHeld.current = false;
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
     return () => {
       window.removeEventListener("focus", focusHandler);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
       resizeObserver.disconnect();
     };
   }, []);
@@ -343,18 +379,22 @@ const GraphEditor = ({
     )?.id;
     updateUIState({ mouseDownPos: p, draggingNodes: false });
 
-    // Shift + left-click is the pan gesture. Capture starting scroll
-    // position here; pointer-move scrolls the viewport against the cursor
-    // delta and pointer-up short-circuits the per-tool logic. We don't
-    // return early so that a shift+click without movement still falls
-    // through to the tool's normal handlers (e.g. shift+click multi-select
-    // in select mode).
-    if (event.button === 0 && event.getModifierState("Shift")) {
+    // Space + left-click is the pan gesture (shift was originally the
+    // modifier, but shift+click is already overloaded by every tool for
+    // multi-select / endpoint stickiness, so we use space instead — a
+    // standard "hand tool" modifier in graphics apps). We capture the
+    // viewport-absolute cursor position alongside the scroll offset so
+    // pointer-move can compute the pan delta in viewport space. Diffing
+    // in SVG-relative coords would be wrong: as we scroll, the SVG
+    // itself shifts under the cursor, halving the apparent pan speed.
+    if (event.button === 0 && spaceHeld.current) {
       const viewport = document.getElementById("graph-editor-viewport")!;
       updateUIState({
         panMode: true,
         panStartScrollLeft: viewport.scrollLeft,
         panStartScrollTop: viewport.scrollTop,
+        panStartClientX: event.clientX,
+        panStartClientY: event.clientY,
       });
     }
 
@@ -411,9 +451,9 @@ const GraphEditor = ({
             updateSelection(new Set(), new Set());
           }
 
-          // Skip the rubber-band when shift is held — shift+drag is reserved
+          // Skip the rubber-band when space is held — space+drag is reserved
           // for panning, and we don't want both gestures running at once.
-          if (!event.getModifierState("Shift")) {
+          if (!spaceHeld.current) {
             updateUIState({
               showSelectionRect: true,
               selectionRect: {
@@ -469,12 +509,21 @@ const GraphEditor = ({
     const p = mousePositionToCoord(event);
     updateUIState({ mouseMoved: true });
 
-    // Shift-pan: scroll the viewport against the cursor delta and short-
-    // circuit the per-tool drag logic so nothing else fires concurrently.
+    // Space-pan: scroll the viewport against the viewport-absolute cursor
+    // delta and short-circuit the per-tool drag logic so nothing else fires
+    // concurrently. We *cannot* use the SVG-relative `p` here — as we set
+    // scrollLeft, the SVG itself shifts in viewport coords and a same
+    // mouse position produces a different `p`. Diffing `p` against a fixed
+    // `mouseDownPos` then under-counts the cursor motion (the next event's
+    // p is partially "absorbed" by the SVG's own shift), producing a
+    // half-speed jittery pan. clientX/clientY are viewport-absolute and
+    // unaffected by scroll, so the delta is the true cursor motion.
     if (uiState.panMode) {
       const viewport = document.getElementById("graph-editor-viewport")!;
-      viewport.scrollLeft = (uiState.panStartScrollLeft ?? 0) - (p.x - uiState.mouseDownPos.x);
-      viewport.scrollTop = (uiState.panStartScrollTop ?? 0) - (p.y - uiState.mouseDownPos.y);
+      viewport.scrollLeft =
+        (uiState.panStartScrollLeft ?? 0) - (event.clientX - (uiState.panStartClientX ?? 0));
+      viewport.scrollTop =
+        (uiState.panStartScrollTop ?? 0) - (event.clientY - (uiState.panStartClientY ?? 0));
       return;
     }
 
@@ -563,11 +612,11 @@ const GraphEditor = ({
       d => Math.abs(d.coord.x - p1.x) < 0.22 && Math.abs(d.coord.y - p1.y) < 0.22
     )?.id;
 
-    // Shift-pan release: skip the per-tool pointer-up logic entirely. The
+    // Space-pan release: skip the per-tool pointer-up logic entirely. The
     // scroll has already happened in pointer-move; we just clean up. A
-    // shift+click without movement (panMode set but mouseMoved false) is
-    // intentionally let through so tool-specific shift+click semantics
-    // (e.g. multi-select toggle on a node) still execute.
+    // space+click without movement (panMode set but mouseMoved false) is
+    // intentionally let through so the tool's normal click behaviour
+    // still runs — space is a transient modifier, not a mode switch.
     if (uiState.panMode && uiState.mouseMoved) {
       if (uiState.smartTool) {
         setTool("select");
