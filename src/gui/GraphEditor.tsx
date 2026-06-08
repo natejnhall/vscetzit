@@ -419,6 +419,12 @@ const GraphEditor = ({
             event.getModifierState("Shift")
           );
         } else {
+          // Starting a new edge drag from a vertex — drop any previously-
+          // selected edge so its CP overlay disappears while the user
+          // gestures.
+          if (clickedNode !== undefined && selectedEdges.size > 0) {
+            updateSelection(selectedNodes, new Set());
+          }
           updateUIState({ edgeStartNode: clickedNode, edgeEndNode: clickedNode });
         }
         break;
@@ -928,6 +934,12 @@ const GraphEditor = ({
       }
       case "cetzit.gui.nodeTool": {
         setTool("vertex");
+        // Vertex mode has no control-point UI; if an edge was selected (its
+        // CPs were on screen), clear it so the canvas reverts to normal.
+        // Node selection is left intact.
+        if (selectedEdges.size > 0) {
+          updateSelection(selectedNodes, new Set());
+        }
         break;
       }
       case "cetzit.gui.edgeTool": {
