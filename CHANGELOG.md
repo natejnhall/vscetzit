@@ -2,6 +2,34 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Lift edge control-point handles into a top-most SVG layer
+
+> It seems that if a label is in front of a control point thing on
+> an edge, the mouse will try to click the label rather than a
+> control point. When a control point interface is open, it should
+> be at the highest click priority (at the "top level").
+
+- Root cause: the draggable CP handle circles were rendered inside
+  the `Edge` component, which sits in `edgeLayer`. `nodeLayer`
+  renders after `edgeLayer`, so any node-label bounding box that
+  overlapped a CP would intercept its click. SVG z-order is render
+  order — the only fix is to render the handles later.
+- Extracted the two handle circles into a new
+  `EdgeControlHandles.tsx` component that re-runs
+  `computeControlPoints` (one extra pure compute per selected edge —
+  negligible) and emits just the two interactive circles.
+- Added a new `<g id="controlPointLayer">` in `GraphEditor.tsx`
+  that's rendered AFTER `nodeLayer`, iterates selected edges, and
+  renders an `EdgeControlHandles` for each. Pointer-down on a
+  handle still bubbles up to the SVG's master handler with
+  `clickedControlPoint.current` set, so the existing
+  drag/double-click logic is unchanged.
+- Removed `onControlPointPointerDown` from `Edge`'s props and the
+  now-dead handle-circle block from `Edge.tsx`. The cosmetic guide
+  pieces (dashed radius circles + tangent lines) stay inside `Edge`
+  since they already have `pointerEvents: none` and don't block
+  anything regardless of layer.
+
 ## Spacebar + drag pans the canvas (and the half-speed bug)
 
 > The trackpad is great, add shift and drag as well for pan.

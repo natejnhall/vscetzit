@@ -16,7 +16,6 @@ interface EdgeProps {
   onPointerDown?: () => void;
   onMouseOver?: () => void;
   onMouseOut?: () => void;
-  onControlPointPointerDown?: (cp: 1 | 2) => void;
   sceneCoords: SceneCoords;
 }
 
@@ -30,7 +29,6 @@ const Edge = ({
   onPointerDown,
   onMouseOver,
   onMouseOut,
-  onControlPointPointerDown,
   sceneCoords,
 }: EdgeProps) => {
   const host = useContext(CetzitHostContext);
@@ -169,28 +167,13 @@ const Edge = ({
           }}
         />
       </g>
-      {selected && (
-        <g>
-          <circle
-            cx={cp1.x}
-            cy={cp1.y}
-            r={0.1 * sceneCoords.scale}
-            fill="rgba(255, 255, 255, 0.8)"
-            stroke={controlColor1}
-            stroke-width={2}
-            onPointerDown={() => onControlPointPointerDown?.(1)}
-          />
-          <circle
-            cx={cp2.x}
-            cy={cp2.y}
-            r={0.1 * sceneCoords.scale}
-            fill="rgba(255, 255, 255, 0.8)"
-            stroke={controlColor1}
-            stroke-width={2}
-            onPointerDown={() => onControlPointPointerDown?.(2)}
-          />
-        </g>
-      )}
+      {/*
+        The draggable CP handle circles used to live here, but they were
+        rendered down in `edgeLayer` and could be occluded by node labels
+        in `nodeLayer`. They've moved to a separate `EdgeControlHandles`
+        component rendered in a top-most layer by `GraphEditor`, so a
+        handle that's visually behind a node label still wins clicks.
+      */}
     </g>
   );
 };

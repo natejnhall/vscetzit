@@ -6,6 +6,7 @@ import { drawGrid } from "../lib/grid";
 import SceneCoords from "../lib/SceneCoords";
 import Node from "./Node";
 import Edge from "./Edge";
+import EdgeControlHandles from "./EdgeControlHandles";
 import Styles from "../lib/Styles";
 import { Coord, EdgeData, NodeData, PathData } from "../lib/Data";
 import { shortenLine } from "../lib/curve";
@@ -1187,7 +1188,6 @@ const GraphEditor = ({
                         updateUIState({ highlightPath: undefined });
                       }
                     }}
-                    onControlPointPointerDown={i => (clickedControlPoint.current = [data.id, i])}
                     sceneCoords={sceneCoords}
                   />
                 );
@@ -1206,6 +1206,27 @@ const GraphEditor = ({
               sceneCoords={sceneCoords}
             />
           ))}
+        </g>
+        {/*
+          Top-most layer for the bezier control-point handles of selected
+          edges. Rendered AFTER nodeLayer so that a handle sitting visually
+          behind a node label still receives pointer events — node labels
+          would otherwise intercept clicks meant for the handle.
+        */}
+        <g id="controlPointLayer">
+          {graph.edges
+            .filter(data => selectedEdges.has(data.id))
+            .map(data => (
+              <EdgeControlHandles
+                key={data.id}
+                data={data}
+                sourceData={graph.node(data.source)!}
+                targetData={graph.node(data.target)!}
+                tikzStyles={tikzStyles}
+                sceneCoords={sceneCoords}
+                onPointerDown={i => (clickedControlPoint.current = [data.id, i])}
+              />
+            ))}
         </g>
         <g id="selectionLayer">
           <rect
