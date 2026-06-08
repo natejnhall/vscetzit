@@ -471,7 +471,7 @@
       },
       {
         "command": "cetzit.gui.nodeTool",
-        "key": "n",
+        "key": "v",
         "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus"
       },
       {

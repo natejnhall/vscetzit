@@ -170,6 +170,152 @@ const GraphEditor = ({
     [sceneCoords, setSceneCoords]
   );
 
+  // ----- shared edge/CP helpers (used by both select-mode and edge-mode) -----
+
+  // Selects (or extends the selection to) the given edge, honouring ctrl
+  // (select whole path) and shift (add to selection) modifiers.
+  const selectEdge = (edgeId: number, ctrl: boolean, shift: boolean) => {
+    if (ctrl) {
+      const path = graph.edge(edgeId)!.path;
+      const pathNodes = new Set(graph.pathNodes(path));
+      const pathEdges = new Set(graph.pathEdges(path));
+      if (!selectedEdges.has(edgeId)) {
+        updateSelection(selectedNodes.union(pathNodes), selectedEdges.union(pathEdges));
+      } else {
+        updateSelection(
+          selectedNodes.difference(pathNodes),
+          selectedEdges.difference(pathEdges)
+        );
+      }
+    } else if (shift) {
+      updateSelection(selectedNodes, selectedEdges.add(edgeId));
+    } else {
+      updateSelection(new Set(), new Set([edgeId]));
+    }
+  };
+
+  // Applies a control-point drag at screen position `p`, updating the
+  // dragged edge's bend / in-angle / out-angle / loop-* fields. Shared by
+  // the select-mode and edge-mode pointer-move handlers.
+  const dragControlPoint = (p: Coord) => {
+    const [edge, pt] = clickedControlPoint.current!;
+    let d = graph.edge(edge)!;
+    const sourceCoord = sceneCoords.coordToScreen(graph.node(d.source)!.coord);
+    const targetCoord = sceneCoords.coordToScreen(graph.node(d.target)!.coord);
+    const dx1 = targetCoord.x - sourceCoord.x;
+    const dy1 = targetCoord.y - sourceCoord.y;
+    let dx2: number, dy2: number;
+    if (pt === 1) {
+      dx2 = p.x - sourceCoord.x;
+      dy2 = p.y - sourceCoord.y;
+    } else {
+      dx2 = p.x - targetCoord.x;
+      dy2 = p.y - targetCoord.y;
+    }
+    const baseDist = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+    const handleDist = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+
+    // Math-y-up angle from anchor toward dragged handle. Screen y is
+    // flipped, so we negate dy.
+    const controlAngle = (Math.atan2(-dy2, dx2) * 180) / Math.PI;
+
+    if (d.isSelfLoop) {
+      const oldLoopAngle = d.propertyFloat("loop-angle") ?? 90;
+      const oldSpread = d.propertyFloat("loop-spread") ?? 90;
+      const oldCp1 = oldLoopAngle + oldSpread / 2;
+      const oldCp2 = oldLoopAngle - oldSpread / 2;
+
+      const snappedCpAngle = Math.round(controlAngle / 15) * 15;
+      let newLoopAngle: number;
+      let newSpread: number;
+      if (pt === 1) {
+        newLoopAngle = (snappedCpAngle + oldCp2) / 2;
+        newSpread = snappedCpAngle - oldCp2;
+      } else {
+        newLoopAngle = (oldCp1 + snappedCpAngle) / 2;
+        newSpread = oldCp1 - snappedCpAngle;
+      }
+      while (newLoopAngle > 180) newLoopAngle -= 360;
+      while (newLoopAngle <= -180) newLoopAngle += 360;
+      const newSize = Math.max(0.1, Math.round((handleDist / sceneCoords.scale) * 10) / 10);
+
+      d = d
+        .setProperty("loop-angle", newLoopAngle)
+        .setProperty("loop-spread", newSpread)
+        .setProperty("loop-size", newSize);
+    } else {
+      let weight: number;
+      if (baseDist !== 0) {
+        weight = handleDist / baseDist;
+      } else {
+        weight = handleDist / sceneCoords.scale;
+      }
+      weight = Math.round(weight * 10) / 10;
+      const looseness = Math.round(weight * 30) / 10;
+      if (looseness === 1) {
+        d = d.unset("looseness");
+      } else {
+        d = d.setProperty("looseness", looseness);
+      }
+
+      if (d.basicBendMode) {
+        const baseAngle = (Math.atan2(-dy1, dx1) * 180) / Math.PI;
+        let bend: number;
+        if (pt === 1) {
+          bend = controlAngle - baseAngle;
+        } else {
+          bend = baseAngle + 180 - controlAngle;
+        }
+        while (bend > 180) bend -= 360;
+        while (bend <= -180) bend += 360;
+        d = d.setBend(Math.round(bend / 15) * 15);
+      } else {
+        if (pt === 1) {
+          d = d.setProperty("out-angle", Math.round(controlAngle / 15) * 15);
+        } else {
+          d = d.setProperty("in-angle", Math.round(controlAngle / 15) * 15);
+        }
+      }
+    }
+
+    updateGraph(graph.setEdgeData(edge, d), false);
+  };
+
+  // Toggles an edge between basic-bend mode and in/out-angle mode (the
+  // double-click on edge / control-point gesture).
+  const toggleEdgeBezierMode = (edgeId: number) => {
+    let d = graph.edge(edgeId)!;
+    const sCoord = graph.node(d.source)!.coord;
+    const tCoord = graph.node(d.target)!.coord;
+    const baseAngle = (Math.atan2(tCoord.y - sCoord.y, tCoord.x - sCoord.x) * 180) / Math.PI;
+
+    if (d.basicBendMode) {
+      // Enter in-out mode: derive absolute tangent angles from baseAngle ± bend.
+      const bend = d.bend;
+      const outAngle = Math.round((baseAngle + bend) / 15) * 15;
+      const inAngle = Math.round((baseAngle + 180 - bend) / 15) * 15;
+      d = d
+        .unset("bend")
+        .setProperty("curve", "in-out")
+        .setProperty("out-angle", outAngle)
+        .setProperty("in-angle", inAngle);
+    } else {
+      // Collapse in-out back to a single bend value.
+      const outAngle = d.propertyFloat("out-angle") ?? 0;
+      const bend = Math.round((outAngle - baseAngle) / 15) * 15;
+      d = d
+        .unset("in-angle")
+        .unset("out-angle")
+        .unset("curve")
+        .setBend(bend);
+      if (bend !== 0) {
+        d = d.setProperty("curve", "bend");
+      }
+    }
+
+    updateGraph(graph.setEdgeData(d.id, d), true);
+  };
+
   const handlePointerDown = (event: TargetedPointerEvent<SVGSVGElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     event.preventDefault();
@@ -236,26 +382,7 @@ const GraphEditor = ({
             }
           }
         } else if (clickedEdge.current !== undefined) {
-          if (event.getModifierState(CTRL)) {
-            // select the whole path the edge is on
-            const path = graph.edge(clickedEdge.current)!.path;
-            const pathNodes = new Set(graph.pathNodes(path));
-            const pathEdges = new Set(graph.pathEdges(path));
-
-            if (!selectedEdges.has(clickedEdge.current)) {
-              updateSelection(selectedNodes.union(pathNodes), selectedEdges.union(pathEdges));
-            } else {
-              updateSelection(
-                selectedNodes.difference(pathNodes),
-                selectedEdges.difference(pathEdges)
-              );
-            }
-          } else if (event.getModifierState("Shift")) {
-            // add/remove an edge from selection
-            updateSelection(selectedNodes, selectedEdges.add(clickedEdge.current));
-          } else {
-            updateSelection(new Set(), new Set([clickedEdge.current]));
-          }
+          selectEdge(clickedEdge.current, event.getModifierState(CTRL), event.getModifierState("Shift"));
         } else {
           if (!multiSelect) {
             updateSelection(new Set(), new Set());
@@ -278,7 +405,22 @@ const GraphEditor = ({
         // nothing to do
         break;
       case "edge":
-        updateUIState({ edgeStartNode: clickedNode, edgeEndNode: clickedNode });
+        // Edge mode mirrors select-mode behaviour when the user clicks on an
+        // existing edge or a control point (rather than a node or empty
+        // space): the edge becomes selected and its CPs become draggable,
+        // and double-click toggles bezier mode (handled in pointer-up). A
+        // click on a node (or empty) still starts a new edge as before.
+        if (clickedControlPoint.current !== undefined) {
+          updateUIState({ prevGraph: graph });
+        } else if (clickedEdge.current !== undefined && clickedNode === undefined) {
+          selectEdge(
+            clickedEdge.current,
+            event.getModifierState(CTRL),
+            event.getModifierState("Shift")
+          );
+        } else {
+          updateUIState({ edgeStartNode: clickedNode, edgeEndNode: clickedNode });
+        }
         break;
     }
   };
@@ -318,117 +460,19 @@ const GraphEditor = ({
             false
           );
         } else if (clickedControlPoint.current !== undefined) {
-          const [edge, pt] = clickedControlPoint.current;
-          let d = graph.edge(edge)!;
-          const sourceCoord = sceneCoords.coordToScreen(graph.node(d.source)!.coord);
-          const targetCoord = sceneCoords.coordToScreen(graph.node(d.target)!.coord);
-          const dx1 = targetCoord.x - sourceCoord.x;
-          const dy1 = targetCoord.y - sourceCoord.y;
-          let dx2: number, dy2: number;
-          if (pt === 1) {
-            dx2 = p.x - sourceCoord.x;
-            dy2 = p.y - sourceCoord.y;
-          } else {
-            dx2 = p.x - targetCoord.x;
-            dy2 = p.y - targetCoord.y;
-          }
-          const baseDist = Math.sqrt(dx1 * dx1 + dy1 * dy1);
-          const handleDist = Math.sqrt(dx2 * dx2 + dy2 * dy2);
-
-          // Math-y-up angle from anchor toward dragged handle. Screen y is
-          // flipped, so we negate dy.
-          const controlAngle = (Math.atan2(-dy2, dx2) * 180) / Math.PI;
-
-          if (d.isSelfLoop) {
-            // cetzit.typ self-loop convention:
-            //   cp1 (source-side, "out") angle = loop-angle + loop-spread/2
-            //   cp2 (target-side, "in")  angle = loop-angle − loop-spread/2
-            //   both control points sit at distance loop-size from the node.
-            //
-            // Dragging semantics:
-            //   • angle  — dragged cp follows the cursor (snapped to 15°);
-            //              un-dragged cp's angle is preserved exactly.
-            //   • length — loop-size tracks the drag distance, so both cps
-            //              update their radius together (length of one =
-            //              length of both, since cetzit.typ shares one radius).
-            //
-            // We snap the *cp angle*, not loop-angle/loop-spread, so the
-            // rounding lands cleanly on the dragged side and leaves the
-            // anchored cp unmoved. Snapping each underlying field
-            // independently would propagate the leftover error to cp2 in
-            // the opposite direction of the drag.
-            const oldLoopAngle = d.propertyFloat("loop-angle") ?? 90;
-            const oldSpread = d.propertyFloat("loop-spread") ?? 90;
-            const oldCp1 = oldLoopAngle + oldSpread / 2;
-            const oldCp2 = oldLoopAngle - oldSpread / 2;
-
-            const snappedCpAngle = Math.round(controlAngle / 15) * 15;
-            let newLoopAngle: number;
-            let newSpread: number;
-            if (pt === 1) {
-              newLoopAngle = (snappedCpAngle + oldCp2) / 2;
-              newSpread = snappedCpAngle - oldCp2;
-            } else {
-              newLoopAngle = (oldCp1 + snappedCpAngle) / 2;
-              newSpread = oldCp1 - snappedCpAngle;
-            }
-            while (newLoopAngle > 180) newLoopAngle -= 360;
-            while (newLoopAngle <= -180) newLoopAngle += 360;
-            const newSize = Math.max(0.1, Math.round((handleDist / sceneCoords.scale) * 10) / 10);
-
-            d = d
-              .setProperty("loop-angle", newLoopAngle)
-              .setProperty("loop-spread", newSpread)
-              .setProperty("loop-size", newSize);
-          } else {
-            // Match cetzit.typ: control-point distance = looseness · |s→t| / 3.
-            let weight: number;
-            if (baseDist !== 0) {
-              weight = handleDist / baseDist;
-            } else {
-              weight = handleDist / sceneCoords.scale;
-            }
-            weight = Math.round(weight * 10) / 10;
-            // Round the product back to 1 decimal too so we don't store
-            // IEEE-754 fallout like 1.7999999999999998.
-            const looseness = Math.round(weight * 30) / 10;
-            if (looseness === 1) {
-              d = d.unset("looseness");
-            } else {
-              d = d.setProperty("looseness", looseness);
-            }
-
-            if (d.basicBendMode) {
-              const baseAngle = (Math.atan2(-dy1, dx1) * 180) / Math.PI;
-              // Cetzit convention: positive bend = CCW pivot of outAngle.
-              //   pt=1 (source-side): outAngle = baseAngle + bend  → bend = controlAngle − baseAngle
-              //   pt=2 (target-side): inAngle  = baseAngle + 180 − bend → bend = baseAngle + 180 − controlAngle
-              let bend: number;
-              if (pt === 1) {
-                bend = controlAngle - baseAngle;
-              } else {
-                bend = baseAngle + 180 - controlAngle;
-              }
-              while (bend > 180) bend -= 360;
-              while (bend <= -180) bend += 360;
-              d = d.setBend(Math.round(bend / 15) * 15);
-            } else {
-              if (pt === 1) {
-                d = d.setProperty("out-angle", Math.round(controlAngle / 15) * 15);
-              } else {
-                d = d.setProperty("in-angle", Math.round(controlAngle / 15) * 15);
-              }
-            }
-          }
-
-          updateGraph(graph.setEdgeData(edge, d), false);
+          dragControlPoint(p);
         }
         break;
       case "vertex":
         // nothing to do
         break;
       case "edge":
-        if (uiState.edgeStartNode !== undefined) {
+        if (clickedControlPoint.current !== undefined) {
+          // CP dragging works in edge mode too: clicking an edge to select
+          // it (above) exposes its CPs, and dragging them tunes the curve
+          // without leaving edge mode.
+          dragControlPoint(p);
+        } else if (uiState.edgeStartNode !== undefined) {
           const p1 = sceneCoords.coordFromScreen(p);
           const n = graph.nodes.find(
             d => Math.abs(d.coord.x - p1.x) < 0.22 && Math.abs(d.coord.y - p1.y) < 0.22
@@ -494,38 +538,7 @@ const GraphEditor = ({
             clickedControlPoint.current !== undefined
           ) {
             const edge = clickedEdge.current ?? clickedControlPoint.current![0];
-            let d = graph.edge(edge)!;
-            const sCoord = graph.node(d.source)!.coord;
-            const tCoord = graph.node(d.target)!.coord;
-            const baseAngle =
-              (Math.atan2(tCoord.y - sCoord.y, tCoord.x - sCoord.x) * 180) / Math.PI;
-
-            if (d.basicBendMode) {
-              // Enter in-out mode: derive absolute tangent angles from
-              // baseAngle ± bend (cetzit convention: positive bend = CCW).
-              const bend = d.bend;
-              const outAngle = Math.round((baseAngle + bend) / 15) * 15;
-              const inAngle = Math.round((baseAngle + 180 - bend) / 15) * 15;
-              d = d
-                .unset("bend")
-                .setProperty("curve", "in-out")
-                .setProperty("out-angle", outAngle)
-                .setProperty("in-angle", inAngle);
-            } else {
-              // Collapse in-out back to a single bend value.
-              const outAngle = d.propertyFloat("out-angle") ?? 0;
-              const bend = Math.round((outAngle - baseAngle) / 15) * 15;
-              d = d
-                .unset("in-angle")
-                .unset("out-angle")
-                .unset("curve")
-                .setBend(bend);
-              if (bend !== 0) {
-                d = d.setProperty("curve", "bend");
-              }
-            }
-
-            updateGraph(graph.setEdgeData(d.id, d), true);
+            toggleEdgeBezierMode(edge);
           }
         } else if (uiState.showSelectionRect) {
           const sel = new Set(selectedNodes);
@@ -601,6 +614,26 @@ const GraphEditor = ({
         break;
       }
       case "edge":
+        // Edge-mode double-click on an edge or control-point toggles bezier
+        // mode, mirroring select-mode behaviour.
+        if (
+          numClicks.current >= 2 &&
+          (clickedEdge.current !== undefined || clickedControlPoint.current !== undefined)
+        ) {
+          const edge = clickedEdge.current ?? clickedControlPoint.current![0];
+          toggleEdgeBezierMode(edge);
+          break;
+        }
+
+        // Edge-mode control-point drag release: commit if the drag actually
+        // changed the graph.
+        if (clickedControlPoint.current !== undefined) {
+          if (!uiState.prevGraph?.equals(graph)) {
+            updateGraph(graph, true);
+          }
+          break;
+        }
+
         if (uiState.edgeStartNode !== undefined && uiState.edgeEndNode !== undefined) {
           // Right-click on a node in select mode with no drag → open the
           // label editor instead of creating a self-loop. Self-loops in
