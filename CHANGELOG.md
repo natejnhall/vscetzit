@@ -2,6 +2,23 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Empty click in edge mode closes the CP interface
+
+> I should also be able to empty click in edge mode while a control
+> point is selected and have the control point interface go away.
+
+- The edge-mode pointer-down's "else" branch (the catch-all that
+  fires when the click didn't land on an edge or a CP handle)
+  already cleared edge selection — but only when `clickedNode`
+  was defined, i.e. only when the user was starting a new edge
+  drag from a vertex. An empty-canvas click would also reach this
+  branch but the `clickedNode !== undefined` guard kept the edge
+  (and its CP overlay) selected.
+- Dropped the guard. Any click that reaches the else branch is
+  now a definite signal to deselect the current edge — either the
+  user is starting a new edge gesture or just clicking off the
+  current selection.
+
 ## Lift edge control-point handles into a top-most SVG layer
 
 > It seems that if a label is in front of a control point thing on

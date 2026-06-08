@@ -486,10 +486,15 @@ const GraphEditor = ({
             event.getModifierState("Shift")
           );
         } else {
-          // Starting a new edge drag from a vertex — drop any previously-
-          // selected edge so its CP overlay disappears while the user
-          // gestures.
-          if (clickedNode !== undefined && selectedEdges.size > 0) {
+          // Either starting a new edge drag from a vertex, OR an empty
+          // click on the canvas. In both cases, drop any previously-
+          // selected edge so the CP overlay goes away — the user has
+          // moved on (either gesturing a new edge, or explicitly
+          // clicking off the current selection). The earlier branches
+          // already handled the cases where the click landed on the
+          // selected edge or its CPs, so reaching this branch is a
+          // definite signal that the CP interface should close.
+          if (selectedEdges.size > 0) {
             updateSelection(selectedNodes, new Set());
           }
           updateUIState({ edgeStartNode: clickedNode, edgeEndNode: clickedNode });
