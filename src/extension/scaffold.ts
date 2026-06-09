@@ -216,31 +216,65 @@ export async function scaffoldProject(context: vscode.ExtensionContext): Promise
 // a workspace file watcher that regenerates the barrel whenever a figure is
 // added, removed, or renamed.
 
-// Lists every `*.typ` file in the barrel's directory, excluding the barrel
-// itself. Returns the basenames (without path), alphabetically sorted for
-// stable regeneration across runs. Returns an empty array if the directory
-// doesn't exist yet.
-async function listFigureFiles(barrel: vscode.Uri): Promise<string[]> {
-  const dir = vscode.Uri.file(path.dirname(barrel.fsPath));
-  const barrelName = path.basename(barrel.fsPath);
-  try {
-    const entries = await vscode.workspace.fs.readDirectory(dir);
-    return entries
-      .filter(
-        ([name, type]) =>
-          type === vscode.FileType.File && name.endsWith(".typ") && name !== barrelName
-      )
-      .map(([name]) => name)
-      .sort();
-  } catch {
-    return [];
-  }
+// Returns true iff `filePath` lives anywhere under `dir` (recursively).
+// Same-dir match counts; sibling/parent paths don't.
+function isUnderDir(filePath: string, dir: string): boolean {
+  const rel = path.relative(dir, filePath);
+  if (rel === "" || rel === ".") return false;
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
-// Writes the barrel file based on whatever figures currently exist in its
-// directory. The barrel uses the same name-from-basename convention as the
-// figure emitter, so renaming a figure file requires opening + saving it in
-// the GUI for the new function name to land in the file.
+// Walks the barrel's directory recursively and returns the relative paths
+// (always using forward slashes — Typst's `#import` expects POSIX-style
+// paths) of every `*.typ` file we should re-export. Skips:
+//   - the barrel file itself
+//   - any file or directory whose name starts with `_` (tooling files like
+//     `_all.typ`, plus reserved scratch dirs like `_drafts/`)
+//   - any dot-directory (e.g. `.git/`)
+// Returned list is sorted for stable diffs across regenerations.
+async function listFigureFiles(barrel: vscode.Uri): Promise<string[]> {
+  const barrelDir = path.dirname(barrel.fsPath);
+  const barrelName = path.basename(barrel.fsPath);
+  const out: string[] = [];
+
+  const walk = async (relDir: string): Promise<void> => {
+    const absDir = vscode.Uri.file(path.join(barrelDir, relDir));
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(absDir);
+    } catch {
+      return;
+    }
+    for (const [name, type] of entries) {
+      const childRel = relDir ? `${relDir}/${name}` : name;
+      if (type === vscode.FileType.Directory) {
+        if (name.startsWith("_") || name.startsWith(".")) continue;
+        await walk(childRel);
+      } else if (type === vscode.FileType.File) {
+        if (!name.endsWith(".typ")) continue;
+        if (name.startsWith("_")) continue;
+        if (relDir === "" && name === barrelName) continue;
+        out.push(childRel);
+      }
+    }
+  };
+
+  await walk("");
+  out.sort();
+  return out;
+}
+
+// Writes the barrel file based on whatever figures currently exist under
+// its directory (recursively). The barrel uses the same
+// name-from-basename convention as the figure emitter, so the imported
+// identifier always matches the figure's `#let <name>(...)` regardless of
+// which subdirectory the file sits in.
+//
+// Two files with the same basename in different subdirectories produce two
+// `#import` lines binding the same identifier — the second shadows the
+// first under Typst's normal scoping rules. We emit a `// WARNING:`
+// comment in the barrel when this happens so the user can rename one
+// rather than silently losing access.
 export async function regenerateBarrelFile(workspaceRoot: vscode.Uri): Promise<void> {
   const barrel = barrelUri(workspaceRoot);
   if (!barrel) return;
@@ -250,20 +284,41 @@ export async function regenerateBarrelFile(workspaceRoot: vscode.Uri): Promise<v
   const lines: string[] = [
     `// ${barrelRelative()} — auto-maintained by cetzit.`,
     "//",
-    "// Re-exports every figure function in this directory so main.typ can",
-    "// import them all in one line:",
+    "// Re-exports every figure function under this directory (recursively)",
+    "// so main.typ can import them all in one line:",
     "//",
     `//   #import "/${barrelRelative()}": *`,
     "//",
     "// Don't hand-edit — the cetzit extension regenerates this file when",
-    "// figures are added, removed, or renamed. Each figure's function name",
-    "// matches its filename (sanitised to a valid Typst identifier), so",
-    "// renaming a figure file requires re-saving it through the GUI for the",
-    "// new function name to land inside the file.",
+    "// figures are added, removed, moved, or renamed. Each figure's",
+    "// function name is derived from its filename (the basename, sanitised",
+    "// to a valid Typst identifier), so files in nested directories still",
+    "// surface here under their bare basename.",
     "",
   ];
+
+  // Detect basename collisions across subdirectories so we can flag them
+  // to the user. We still emit every import line — the user can pick
+  // which one wins by renaming.
+  const byBasename = new Map<string, string[]>();
+  for (const rel of figures) {
+    const base = sanitizeFuncName(path.posix.basename(rel, ".typ"));
+    const existing = byBasename.get(base);
+    if (existing) existing.push(rel);
+    else byBasename.set(base, [rel]);
+  }
+  for (const [name, paths] of byBasename) {
+    if (paths.length > 1) {
+      lines.push(
+        `// WARNING: ${paths.length} figures resolve to the same name \`${name}\`: ${paths.join(", ")}.`,
+        "// Typst will shadow earlier imports with later ones — rename one to disambiguate.",
+        ""
+      );
+    }
+  }
+
   for (const file of figures) {
-    const funcName = sanitizeFuncName(file.replace(/\.typ$/, ""));
+    const funcName = sanitizeFuncName(path.posix.basename(file, ".typ"));
     lines.push(`#import "${file}": ${funcName}`);
   }
 
@@ -318,9 +373,18 @@ export function setupBarrelWatcher(context: vscode.ExtensionContext): void {
     const barrel = barrelUri(workspaceRoot);
     if (!barrel) return;
 
-    // Only care about files inside the barrel's own directory.
+    // Care about files anywhere under the barrel's directory (recursive).
+    // The original top-level-only check missed files moved into
+    // subdirectories — the barrel would lose the line entirely and we'd
+    // end up with a stale "the file vanished" state.
     const barrelDir = path.dirname(barrel.fsPath);
-    if (path.dirname(uri.fsPath) !== barrelDir) return;
+    if (!isUnderDir(uri.fsPath, barrelDir)) return;
+
+    // Skip tooling files (underscore-prefixed) and files inside an
+    // underscore-prefixed subdirectory — those mirror the same exclusion
+    // in `listFigureFiles` so the watcher doesn't re-fire pointlessly.
+    const segments = path.relative(barrelDir, uri.fsPath).split(path.sep);
+    if (segments.some(s => s.startsWith("_") || s.startsWith("."))) return;
 
     // Skip the barrel itself to avoid feedback loops on regeneration.
     if (uri.fsPath === barrel.fsPath) return;
@@ -355,9 +419,27 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Per-rename driver. Filters non-figure renames, computes old/new sanitized
-// function names, rewrites the `#let` inside the figure file, and offers
-// to update call sites elsewhere in the workspace.
+// Per-rename driver. Handles three orthogonal cases that can happen in a
+// single rename event:
+//
+//   - basename change (e.g. fig1.typ → fig3.typ): rewrite the `#let` in
+//     the renamed file and offer to update workspace-wide call sites.
+//   - directory change within the barrel tree (e.g. figures/fig.typ →
+//     figures/sub/fig.typ): no in-file edit, no usage prompt — the only
+//     thing that changes is the path in the barrel's `#import` line.
+//   - move INTO or OUT OF the barrel tree (e.g. other/fig.typ →
+//     figures/fig.typ): no in-file edit (the file may never have had a
+//     `#let` line), no usage prompt — the barrel just needs to gain or
+//     drop the import.
+//
+// In all three cases we explicitly call `regenerateBarrelFile` at the
+// end. The filesystem watcher's delete+create pair *might* also fire for
+// renames, but in practice Tinymist's "update imports on file rename"
+// feature can race us: it rewrites just the path string in the barrel's
+// `#import` line (leaving the binding identifier stale), producing
+// `#import "newname.typ": oldname` — a half-applied edit that breaks the
+// import. Regenerating from this handler overwrites that with the
+// correct line.
 async function handleFigureRenames(
   files: ReadonlyArray<{ readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }>
 ): Promise<void> {
@@ -371,31 +453,46 @@ async function handleFigureRenames(
     if (!barrel) continue;
     const barrelDir = path.dirname(barrel.fsPath);
 
-    // Only care about renames that begin AND end inside the barrel's
-    // directory. A move INTO or OUT OF the figures dir isn't a "rename"
-    // for our purposes — it's a category change, and the source file may
-    // never have had a `#let <name>` line to begin with.
-    if (path.dirname(newUri.fsPath) !== barrelDir) continue;
-    if (path.dirname(oldUri.fsPath) !== barrelDir) continue;
+    // At least one end must be in the barrel tree — a rename between two
+    // unrelated workspace locations is none of our business.
+    const oldUnder = isUnderDir(oldUri.fsPath, barrelDir);
+    const newUnder = isUnderDir(newUri.fsPath, barrelDir);
+    if (!oldUnder && !newUnder) continue;
 
     // Skip the barrel itself.
     if (newUri.fsPath === barrel.fsPath || oldUri.fsPath === barrel.fsPath) continue;
 
-    // Skip files the barrel watcher ignores (underscore-prefixed are
-    // tooling files, not figures — see the customEditor glob).
-    if (path.basename(newUri.fsPath).startsWith("_")) continue;
-    if (path.basename(oldUri.fsPath).startsWith("_")) continue;
+    // Skip tooling files (underscore-prefixed) at any depth.
+    const skipSegment = (s: string) => s.startsWith("_") || s.startsWith(".");
+    const oldSegs = oldUnder ? path.relative(barrelDir, oldUri.fsPath).split(path.sep) : [];
+    const newSegs = newUnder ? path.relative(barrelDir, newUri.fsPath).split(path.sep) : [];
+    if (oldSegs.some(skipSegment) || newSegs.some(skipSegment)) continue;
 
     const oldFunc = sanitizeFuncName(path.basename(oldUri.fsPath, ".typ"));
     const newFunc = sanitizeFuncName(path.basename(newUri.fsPath, ".typ"));
+    const namesChanged = oldFunc !== newFunc;
 
-    // Sanitisation collapsed both names to the same identifier (e.g. user
-    // renamed `fig-1` to `fig_1`, both sanitise the same), so there's
-    // nothing to do.
-    if (oldFunc === newFunc) continue;
+    // Only rewrite the in-file `#let` if (a) the basename actually
+    // changed, AND (b) the file still ends up inside the barrel tree.
+    // Moving a figure OUT of the barrel dir doesn't trigger an in-file
+    // rename — at that point the file is the user's to manage.
+    if (namesChanged && newUnder) {
+      await renameFunctionInFigure(newUri, oldFunc, newFunc);
+    }
 
-    await renameFunctionInFigure(newUri, oldFunc, newFunc);
-    await maybePromptRenameUsages(workspaceRoot, oldFunc, newFunc, newUri);
+    // Regenerate the barrel deterministically. This overwrites any
+    // partial edit Tinymist may have applied to the import line and
+    // also covers subdirectory moves where the basename was stable.
+    if (await fileExists(barrel)) {
+      await regenerateBarrelFile(workspaceRoot);
+    }
+
+    // Only offer the workspace-wide rename when the *identifier* itself
+    // changed. A pure relocation (subdir move) leaves call sites
+    // correct, since they reference the identifier, not the path.
+    if (namesChanged) {
+      await maybePromptRenameUsages(workspaceRoot, oldFunc, newFunc, newUri);
+    }
   }
 }
 

@@ -2,6 +2,69 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Barrel handles subdirectories; rename overwrites Tinymist's partial edit
+
+> I'd also like the barrel file to handle subdirectories well.
+> Currently, if I move a file to a subdirectory, the barrel file
+> handles it as a name change and it appears to work. But there
+> seems to be an issue saving the result, since I think the
+> listener for the barrel file doesn't scan the subdirectory and
+> so there's a mismatch between the file contents and what the
+> listener considers to be in the directory. Also, you fixed the
+> function name to be updated within the file itself, but the
+> import still isn't working in the barrel file. `#import
+> "oldname.typ": oldname` becomes `#import "newname.typ": oldname`.
+
+Two bugs, related.
+
+**Subdirectory support.**
+- `listFigureFiles` rewritten to walk the barrel's directory
+  recursively. Returns relative paths with POSIX `/` separators
+  (Typst's `#import` expects forward slashes regardless of host
+  OS). Skips any file or directory whose name starts with `_` or
+  `.` (tooling files like `_all.typ` and dot-dirs like `.git`).
+  Result is sorted for stable diffs.
+- The watcher's "is this file in the barrel dir?" check changed
+  from `path.dirname === barrelDir` to a new `isUnderDir` helper
+  that handles arbitrary nesting. Same exclusion for
+  underscore/dot segments is applied so the watcher doesn't
+  re-fire when a tooling file gets touched deep in a subdir.
+- `regenerateBarrelFile` now derives the import binding from
+  `path.posix.basename(rel, ".typ")` so a file at
+  `figures/sub/foo.typ` still surfaces as `#import "sub/foo.typ":
+  foo` — the user can call `#foo()` regardless of the path.
+- Basename collisions across subdirs are detected: if two paths
+  resolve to the same identifier, the barrel emits a
+  `// WARNING:` comment listing the conflicting paths and
+  explaining that Typst shadows earlier imports with later ones.
+  We still emit every import line; the user picks the winner by
+  renaming.
+
+**Binding-name not updating on rename.**
+- Root cause: Tinymist has a "update imports on file rename"
+  LSP feature that rewrites the path string in importing files
+  when a target gets renamed. It correctly updates the path
+  (`"oldname.typ"` → `"newname.typ"`) but doesn't know about our
+  barrel convention that the binding identifier should also
+  match, so it leaves `: oldname` in place — producing
+  `#import "newname.typ": oldname`, which is broken. Our
+  filesystem watcher *should* have raced and overwritten that
+  with a fresh regeneration, but with renames going through
+  VS Code's UI the filesystem-level delete+create can be
+  suppressed in favour of `onDidRenameFiles` alone.
+- Fix: `handleFigureRenames` now explicitly calls
+  `regenerateBarrelFile` after handling the in-file `#let`
+  rewrite. This runs on every figure rename — including pure
+  relocations into/within subdirs — and always overwrites any
+  partial edit Tinymist may have applied.
+- The handler also accepts a wider class of renames now:
+  basename change, directory move within the tree, and
+  move-in/move-out of the barrel dir. The in-file rewrite and
+  usage prompt only fire when the basename (i.e. the identifier)
+  actually changed AND the file still lives under the barrel
+  tree; everything else is a pure path change covered by the
+  barrel regeneration alone.
+
 ## Renaming a figure file updates its in-file function name
 
 > If I rename a file (say, fig1.typ becomes fig3.typ) I want the
