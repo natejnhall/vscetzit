@@ -114,6 +114,58 @@ export function sanitizeFuncName(basename: string): string {
 const promptedWorkspaces = new Set<string>();
 const promptedBarrelWorkspaces = new Set<string>();
 
+// ---- Popup queue ----
+//
+// Rename popups have to be serialised. VS Code's `showInformationMessage`
+// nominally persists until the user clicks a button, but in practice only
+// ONE toast is visible at the bottom-right at a time — newer toasts push
+// older ones into the (collapsed, easily-missed) notification centre. If
+// the user renames two figures in quick succession, the second popup
+// "overwrites" the first from the user's POV. We solve this by chaining
+// all rename prompts onto a single Promise queue: each prompt awaits the
+// previous one before showing, so the user only ever sees one popup at a
+// time and never loses a chance to confirm.
+let promptChain: Promise<void> = Promise.resolve();
+
+function enqueuePrompt(task: () => Promise<void>): void {
+  promptChain = promptChain.then(task).catch(e => {
+    // eslint-disable-next-line no-console
+    console.error("cetzit: prompt task failed", e);
+  });
+}
+
+// ---- Debounced barrel regenerate ----
+//
+// Tinymist's "update imports on file rename" LSP feature applies its edits
+// to the barrel asynchronously, sometimes AFTER our explicit regenerate.
+// When that happens, Tinymist rewrites the path string in the
+// `#import "<path>": <binding>` line but leaves the binding identifier
+// stale (it doesn't know about our convention), reproducing the original
+// bug. To win the race deterministically, every rename schedules a
+// deferred second regenerate ~600ms later — by then any LSP-driven edits
+// have landed, and we overwrite them. Per-workspace debouncing collapses
+// bursts of renames into a single deferred write.
+const pendingRegens = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleBarrelRegenerate(workspaceRoot: vscode.Uri, delayMs: number = 600): void {
+  const key = workspaceRoot.fsPath;
+  const existing = pendingRegens.get(key);
+  if (existing) clearTimeout(existing);
+  const handle = setTimeout(async () => {
+    pendingRegens.delete(key);
+    const barrel = barrelUri(workspaceRoot);
+    if (barrel && (await fileExists(barrel))) {
+      try {
+        await regenerateBarrelFile(workspaceRoot);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("cetzit: deferred barrel regenerate failed", e);
+      }
+    }
+  }, delayMs);
+  pendingRegens.set(key, handle);
+}
+
 // Called from the figure editor on open. If the workspace already has a
 // styles file, no-op. Otherwise prompt the user with a Create/Cancel popup;
 // on Create, write the commented template. On Cancel (or dismissal) the
@@ -419,27 +471,25 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Per-rename driver. Handles three orthogonal cases that can happen in a
-// single rename event:
+// Per-rename driver. Logic is intentionally invariant to subdirectory
+// depth — a rename inside `figures/sub/sub/` behaves identically to one
+// at the root of `figures/`. The handler distinguishes three orthogonal
+// cases that can happen in a single rename event:
 //
 //   - basename change (e.g. fig1.typ → fig3.typ): rewrite the `#let` in
 //     the renamed file and offer to update workspace-wide call sites.
 //   - directory change within the barrel tree (e.g. figures/fig.typ →
 //     figures/sub/fig.typ): no in-file edit, no usage prompt — the only
 //     thing that changes is the path in the barrel's `#import` line.
-//   - move INTO or OUT OF the barrel tree (e.g. other/fig.typ →
-//     figures/fig.typ): no in-file edit (the file may never have had a
-//     `#let` line), no usage prompt — the barrel just needs to gain or
-//     drop the import.
+//   - move INTO or OUT OF the barrel tree: no in-file edit (the file may
+//     never have had a `#let` line), no usage prompt — the barrel just
+//     needs to gain or drop the import line.
 //
-// In all three cases we explicitly call `regenerateBarrelFile` at the
-// end. The filesystem watcher's delete+create pair *might* also fire for
-// renames, but in practice Tinymist's "update imports on file rename"
-// feature can race us: it rewrites just the path string in the barrel's
-// `#import` line (leaving the binding identifier stale), producing
-// `#import "newname.typ": oldname` — a half-applied edit that breaks the
-// import. Regenerating from this handler overwrites that with the
-// correct line.
+// Every relevant rename triggers BOTH an immediate barrel regenerate AND
+// a deferred regenerate (via `scheduleBarrelRegenerate`) so we win the
+// race with Tinymist's async "update imports on rename" feature, which
+// otherwise leaves the barrel's `#import` line with a half-applied edit
+// (path updated, binding identifier stale).
 async function handleFigureRenames(
   files: ReadonlyArray<{ readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }>
 ): Promise<void> {
@@ -453,8 +503,7 @@ async function handleFigureRenames(
     if (!barrel) continue;
     const barrelDir = path.dirname(barrel.fsPath);
 
-    // At least one end must be in the barrel tree — a rename between two
-    // unrelated workspace locations is none of our business.
+    // At least one end must be in the barrel tree.
     const oldUnder = isUnderDir(oldUri.fsPath, barrelDir);
     const newUnder = isUnderDir(newUri.fsPath, barrelDir);
     if (!oldUnder && !newUnder) continue;
@@ -462,7 +511,7 @@ async function handleFigureRenames(
     // Skip the barrel itself.
     if (newUri.fsPath === barrel.fsPath || oldUri.fsPath === barrel.fsPath) continue;
 
-    // Skip tooling files (underscore-prefixed) at any depth.
+    // Skip tooling files (any segment starting with `_` or `.`).
     const skipSegment = (s: string) => s.startsWith("_") || s.startsWith(".");
     const oldSegs = oldUnder ? path.relative(barrelDir, oldUri.fsPath).split(path.sep) : [];
     const newSegs = newUnder ? path.relative(barrelDir, newUri.fsPath).split(path.sep) : [];
@@ -472,26 +521,47 @@ async function handleFigureRenames(
     const newFunc = sanitizeFuncName(path.basename(newUri.fsPath, ".typ"));
     const namesChanged = oldFunc !== newFunc;
 
-    // Only rewrite the in-file `#let` if (a) the basename actually
-    // changed, AND (b) the file still ends up inside the barrel tree.
-    // Moving a figure OUT of the barrel dir doesn't trigger an in-file
-    // rename — at that point the file is the user's to manage.
+    // eslint-disable-next-line no-console
+    console.log(
+      `cetzit: figure rename ${oldUri.fsPath} → ${newUri.fsPath} ` +
+        `(${oldFunc} → ${newFunc}, namesChanged=${namesChanged}, ` +
+        `oldUnder=${oldUnder}, newUnder=${newUnder})`
+    );
+
+    // Rewrite the in-file `#let` IFF the identifier changed and the file
+    // still lives under the barrel tree. The path the file sits under is
+    // irrelevant — what matters is that the identifier the file should
+    // expose has changed.
     if (namesChanged && newUnder) {
       await renameFunctionInFigure(newUri, oldFunc, newFunc);
     }
 
-    // Regenerate the barrel deterministically. This overwrites any
-    // partial edit Tinymist may have applied to the import line and
-    // also covers subdirectory moves where the basename was stable.
+    // Regenerate the barrel immediately, then schedule a deferred
+    // regenerate to overwrite any post-rename edit Tinymist applies
+    // asynchronously. Both fire for every rename — same code path
+    // regardless of subdirectory depth.
     if (await fileExists(barrel)) {
-      await regenerateBarrelFile(workspaceRoot);
+      try {
+        await regenerateBarrelFile(workspaceRoot);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("cetzit: immediate barrel regenerate failed", e);
+      }
+      scheduleBarrelRegenerate(workspaceRoot);
     }
 
-    // Only offer the workspace-wide rename when the *identifier* itself
-    // changed. A pure relocation (subdir move) leaves call sites
-    // correct, since they reference the identifier, not the path.
+    // Queue (don't await) the workspace-wide rename prompt. Queueing
+    // ensures that if the user renames several figures in quick
+    // succession, each popup is shown sequentially after the previous is
+    // resolved — VS Code's notification UI only displays one toast at a
+    // time, so without serialisation later popups visually "overwrite"
+    // earlier ones from the user's POV.
     if (namesChanged) {
-      await maybePromptRenameUsages(workspaceRoot, oldFunc, newFunc, newUri);
+      const wsRoot = workspaceRoot;
+      const oF = oldFunc;
+      const nF = newFunc;
+      const target = newUri;
+      enqueuePrompt(() => maybePromptRenameUsages(wsRoot, oF, nF, target));
     }
   }
 }
@@ -507,7 +577,9 @@ async function renameFunctionInFigure(
   let doc: vscode.TextDocument;
   try {
     doc = await vscode.workspace.openTextDocument(uri);
-  } catch {
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error(`cetzit: openTextDocument failed for ${uri.fsPath}`, e);
     return;
   }
   const text = doc.getText();
@@ -517,20 +589,36 @@ async function renameFunctionInFigure(
   // don't accidentally rewrite a comment or string containing the name.
   const pattern = new RegExp(`(#let\\s+)(${escapeRegex(oldFunc)})(\\s*\\()`);
   const m = pattern.exec(text);
-  if (!m || m.index === undefined) return;
+  if (!m || m.index === undefined) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `cetzit: no \`#let ${oldFunc}(...)\` found in ${uri.fsPath}; ` +
+        `in-file rename skipped. File may have been edited by hand or by another tool.`
+    );
+    return;
+  }
 
   const idStart = m.index + m[1].length;
   const idEnd = idStart + oldFunc.length;
   const edit = new vscode.WorkspaceEdit();
   edit.replace(uri, new vscode.Range(doc.positionAt(idStart), doc.positionAt(idEnd)), newFunc);
   const ok = await vscode.workspace.applyEdit(edit);
-  if (!ok) return;
+  if (!ok) {
+    // eslint-disable-next-line no-console
+    console.error(`cetzit: applyEdit failed for ${uri.fsPath} (#let ${oldFunc} → ${newFunc})`);
+    return;
+  }
 
   // Persist immediately so the file on disk reflects the rename even if
   // the user never opens it in the figure editor afterwards.
   const updated = await vscode.workspace.openTextDocument(uri);
   if (updated.isDirty) {
-    await updated.save();
+    try {
+      await updated.save();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`cetzit: save failed for ${uri.fsPath}`, e);
+    }
   }
 }
 

@@ -2,6 +2,53 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Rename robustness: popup queue, delayed regen, subdir invariance
+
+> The barrel file is not re-importing the functions and the listener
+> is not renaming the functions within the files themselves if the
+> rename happens within a subdirectory. […] Renaming functionality
+> should happen identically regardless of which subdirectory I am
+> in. […] When a file rename occurs, provide the popup. There also
+> seems to be an issue with the popup in that if I rename a
+> different file before dealing with the first popup, the popup
+> gets overwritten and I lose the opportunity to rename instances
+> of the function use in the main document. Fix this too — have
+> popups persist.
+
+Three pieces, all in `scaffold.ts`.
+
+**Popup queue.** VS Code's `showInformationMessage` nominally
+persists until clicked, but only ONE toast is visible at the
+bottom-right at a time — newer toasts push older ones into the
+(easily-missed) notification centre, so a rapid sequence of
+renames looked like "the popup got overwritten" from the user's
+POV. New `enqueuePrompt(task)` chains every rename prompt onto a
+single `Promise` chain so each one awaits the previous before
+showing. Users see one popup at a time and can address each in
+order.
+
+**Delayed barrel regenerate to win the Tinymist race.** Tinymist's
+"update imports on file rename" LSP feature applies its edits
+asynchronously and can land AFTER our immediate regenerate,
+producing the half-applied `#import "newname.typ": oldname` line.
+New `scheduleBarrelRegenerate(workspaceRoot, 600ms)` debounces a
+deferred second write per workspace — by ~600ms later all LSP
+edits have settled, and the second regenerate overwrites them.
+Called from `handleFigureRenames` on every relevant rename, same
+code path regardless of subdirectory depth.
+
+**Subdirectory invariance + diagnostic logging.** The handler
+already used `isUnderDir` (not a top-level-only `path.dirname ===
+barrelDir` check), so subdir renames hit the same logic as
+top-level ones — but the user reported they still weren't taking
+effect. Added `console.log` of every rename event (`figure rename
+old → new (oldFunc → newFunc, namesChanged=…, oldUnder=…,
+newUnder=…)`) and `console.warn` from `renameFunctionInFigure`
+when the `#let` regex doesn't match. These surface in the webview
+dev-tools console (Help → Toggle Developer Tools in the host
+window) so we can see exactly why a rename isn't propagating
+without needing speculative fixes.
+
 ## Barrel handles subdirectories; rename overwrites Tinymist's partial edit
 
 > I'd also like the barrel file to handle subdirectories well.
