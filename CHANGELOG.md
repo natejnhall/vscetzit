@@ -2,6 +2,43 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Renaming a figure file updates its in-file function name
+
+> If I rename a file (say, fig1.typ becomes fig3.typ) I want the
+> function in the file to be updated accordingly. The barrel file
+> updates the name of the file already, but not the function name.
+> Change this too. Don't have the extension change the main
+> document, but maybe add a popup asking if the user wants to
+> change instances of fig1() to fig3().
+
+- New `vscode.workspace.onDidRenameFiles` listener wired in
+  `setupBarrelWatcher`. Only handles renames that BOTH start and
+  end inside the barrel's directory and skips the barrel itself
+  plus any underscore-prefixed file (tooling files like `_all.typ`
+  are not figures).
+- `renameFunctionInFigure` rewrites the `#let <oldFunc>(...)`
+  line in the renamed file using a regex anchored on `#let` +
+  whitespace + the exact identifier + `(`, so a stray comment or
+  string containing the name isn't accidentally rewritten. Edit
+  is applied via `WorkspaceEdit` + `applyEdit` so it composes
+  with any open custom editor on the file, then saved.
+- `maybePromptRenameUsages` scans the workspace for identifier-
+  bounded `oldFunc` occurrences in all other `.typ` files
+  (skipping the renamed file and the auto-regenerated barrel),
+  collects ranges, and pops a "Replace N uses across M files? /
+  Cancel" non-modal info message. On Replace, all hits are
+  rewritten in a single `WorkspaceEdit` and saved. Identifier
+  boundary uses `(?<![a-zA-Z0-9_-])` lookaround instead of `\b`
+  because hyphens are valid in Typst identifiers but break `\b`.
+- The user is never silently refactored — the file rename
+  triggers ONE auto-edit (the figure's own `#let` line) and an
+  optional opt-in for everything else.
+- External renames (e.g. `mv` from a terminal) only trigger the
+  filesystem watcher's delete+create pair, not the rename event;
+  the barrel will regenerate but the in-file function stays
+  stale. Tolerable for v1 — covers the common case of renaming
+  in VS Code's explorer.
+
 ## Tighten double-click window from 400ms to 200ms
 
 > make the time between clicks required to count as a "double click"

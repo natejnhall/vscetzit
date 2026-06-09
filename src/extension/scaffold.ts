@@ -336,4 +336,181 @@ export function setupBarrelWatcher(context: vscode.ExtensionContext): void {
   // Content changes don't affect the barrel — only file presence does.
 
   context.subscriptions.push(watcher);
+
+  // Rename hook: when the user renames a figure file (via VS Code's
+  // explorer / F2), the barrel watcher above will re-emit the `#import`
+  // line with the new basename automatically — but the `#let <name>(...)`
+  // inside the file still bears the old name and won't match the new
+  // import. Rewrite the in-file function name to match, and pop up a
+  // prompt offering to update call-site usages workspace-wide.
+  context.subscriptions.push(
+    vscode.workspace.onDidRenameFiles(event => {
+      void handleFigureRenames(event.files);
+    })
+  );
+}
+
+// Escape a string for safe interpolation into a RegExp source.
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Per-rename driver. Filters non-figure renames, computes old/new sanitized
+// function names, rewrites the `#let` inside the figure file, and offers
+// to update call sites elsewhere in the workspace.
+async function handleFigureRenames(
+  files: ReadonlyArray<{ readonly oldUri: vscode.Uri; readonly newUri: vscode.Uri }>
+): Promise<void> {
+  for (const { oldUri, newUri } of files) {
+    if (!newUri.fsPath.endsWith(".typ") || !oldUri.fsPath.endsWith(".typ")) continue;
+
+    const workspaceRoot = vscode.workspace.getWorkspaceFolder(newUri)?.uri;
+    if (!workspaceRoot) continue;
+
+    const barrel = barrelUri(workspaceRoot);
+    if (!barrel) continue;
+    const barrelDir = path.dirname(barrel.fsPath);
+
+    // Only care about renames that begin AND end inside the barrel's
+    // directory. A move INTO or OUT OF the figures dir isn't a "rename"
+    // for our purposes — it's a category change, and the source file may
+    // never have had a `#let <name>` line to begin with.
+    if (path.dirname(newUri.fsPath) !== barrelDir) continue;
+    if (path.dirname(oldUri.fsPath) !== barrelDir) continue;
+
+    // Skip the barrel itself.
+    if (newUri.fsPath === barrel.fsPath || oldUri.fsPath === barrel.fsPath) continue;
+
+    // Skip files the barrel watcher ignores (underscore-prefixed are
+    // tooling files, not figures — see the customEditor glob).
+    if (path.basename(newUri.fsPath).startsWith("_")) continue;
+    if (path.basename(oldUri.fsPath).startsWith("_")) continue;
+
+    const oldFunc = sanitizeFuncName(path.basename(oldUri.fsPath, ".typ"));
+    const newFunc = sanitizeFuncName(path.basename(newUri.fsPath, ".typ"));
+
+    // Sanitisation collapsed both names to the same identifier (e.g. user
+    // renamed `fig-1` to `fig_1`, both sanitise the same), so there's
+    // nothing to do.
+    if (oldFunc === newFunc) continue;
+
+    await renameFunctionInFigure(newUri, oldFunc, newFunc);
+    await maybePromptRenameUsages(workspaceRoot, oldFunc, newFunc, newUri);
+  }
+}
+
+// Rewrite the `#let <oldFunc>(` line in the renamed figure file to use the
+// new function name. Applied via WorkspaceEdit so it composes cleanly with
+// any open custom editor on the file.
+async function renameFunctionInFigure(
+  uri: vscode.Uri,
+  oldFunc: string,
+  newFunc: string
+): Promise<void> {
+  let doc: vscode.TextDocument;
+  try {
+    doc = await vscode.workspace.openTextDocument(uri);
+  } catch {
+    return;
+  }
+  const text = doc.getText();
+  // Match the canonical signature emitted by Graph.cetzit():
+  //   #let <name>(scale: 1.0) = cetzit-render(
+  // We anchor on `#let` + whitespace + the exact identifier + `(` so we
+  // don't accidentally rewrite a comment or string containing the name.
+  const pattern = new RegExp(`(#let\\s+)(${escapeRegex(oldFunc)})(\\s*\\()`);
+  const m = pattern.exec(text);
+  if (!m || m.index === undefined) return;
+
+  const idStart = m.index + m[1].length;
+  const idEnd = idStart + oldFunc.length;
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(uri, new vscode.Range(doc.positionAt(idStart), doc.positionAt(idEnd)), newFunc);
+  const ok = await vscode.workspace.applyEdit(edit);
+  if (!ok) return;
+
+  // Persist immediately so the file on disk reflects the rename even if
+  // the user never opens it in the figure editor afterwards.
+  const updated = await vscode.workspace.openTextDocument(uri);
+  if (updated.isDirty) {
+    await updated.save();
+  }
+}
+
+// Scan the workspace for `oldFunc` call sites outside the renamed file and
+// the (already auto-regenerated) barrel. If any exist, ask the user whether
+// to replace them in a single undoable edit. We never replace silently —
+// the user opted into a file rename, not a workspace-wide refactor.
+async function maybePromptRenameUsages(
+  workspaceRoot: vscode.Uri,
+  oldFunc: string,
+  newFunc: string,
+  renamedUri: vscode.Uri
+): Promise<void> {
+  const barrel = barrelUri(workspaceRoot);
+
+  // Identifier-bounded match — Typst identifiers allow letters, digits,
+  // underscores, and hyphens, so we can't use \b (it treats `-` as a
+  // boundary). Lookbehind/lookahead exclude those characters explicitly.
+  const pattern = new RegExp(`(?<![a-zA-Z0-9_-])${escapeRegex(oldFunc)}(?![a-zA-Z0-9_-])`, "g");
+
+  const files = await vscode.workspace.findFiles("**/*.typ");
+  type Hit = { uri: vscode.Uri; ranges: vscode.Range[] };
+  const candidates: Hit[] = [];
+
+  for (const uri of files) {
+    if (uri.fsPath === renamedUri.fsPath) continue;            // already rewrote
+    if (barrel && uri.fsPath === barrel.fsPath) continue;       // auto-regenerated
+
+    let doc: vscode.TextDocument;
+    try {
+      doc = await vscode.workspace.openTextDocument(uri);
+    } catch {
+      continue;
+    }
+    const text = doc.getText();
+    const ranges: vscode.Range[] = [];
+    let m: RegExpExecArray | null;
+    pattern.lastIndex = 0;
+    while ((m = pattern.exec(text)) !== null) {
+      const start = doc.positionAt(m.index);
+      const end = doc.positionAt(m.index + oldFunc.length);
+      ranges.push(new vscode.Range(start, end));
+    }
+    if (ranges.length > 0) candidates.push({ uri, ranges });
+  }
+
+  if (candidates.length === 0) return;
+
+  const total = candidates.reduce((n, c) => n + c.ranges.length, 0);
+  const useWord = total === 1 ? "use" : "uses";
+  const fileWord = candidates.length === 1 ? "file" : "files";
+  const choice = await vscode.window.showInformationMessage(
+    `cetzit: figure renamed ${oldFunc} → ${newFunc}. Replace ${total} ${useWord} across ${candidates.length} other ${fileWord}?`,
+    { modal: false },
+    "Replace",
+    "Cancel"
+  );
+  if (choice !== "Replace") return;
+
+  const edit = new vscode.WorkspaceEdit();
+  for (const { uri, ranges } of candidates) {
+    for (const r of ranges) edit.replace(uri, r, newFunc);
+  }
+  const ok = await vscode.workspace.applyEdit(edit);
+  if (!ok) {
+    vscode.window.showErrorMessage(`cetzit: failed to apply rename across workspace.`);
+    return;
+  }
+
+  // Save each touched document so the change persists without requiring
+  // the user to manually save every affected file.
+  for (const { uri } of candidates) {
+    try {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      if (doc.isDirty) await doc.save();
+    } catch {
+      /* best-effort */
+    }
+  }
 }
