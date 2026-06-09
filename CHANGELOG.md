@@ -37,17 +37,16 @@ edits have settled, and the second regenerate overwrites them.
 Called from `handleFigureRenames` on every relevant rename, same
 code path regardless of subdirectory depth.
 
-**Subdirectory invariance + diagnostic logging.** The handler
-already used `isUnderDir` (not a top-level-only `path.dirname ===
-barrelDir` check), so subdir renames hit the same logic as
-top-level ones — but the user reported they still weren't taking
-effect. Added `console.log` of every rename event (`figure rename
-old → new (oldFunc → newFunc, namesChanged=…, oldUnder=…,
-newUnder=…)`) and `console.warn` from `renameFunctionInFigure`
-when the `#let` regex doesn't match. These surface in the webview
-dev-tools console (Help → Toggle Developer Tools in the host
-window) so we can see exactly why a rename isn't propagating
-without needing speculative fixes.
+**Error logging on failure paths.** `renameFunctionInFigure` now
+emits a `console.warn` when its `#let <oldFunc>(` regex doesn't
+match the file content (the rewrite is silently skipped, which
+otherwise looks like the handler ran but nothing changed) and
+`console.error` when `openTextDocument` / `applyEdit` / `save`
+throw. These surface in the webview devtools console (Help →
+Toggle Developer Tools in the host window) so legitimate
+failures can be diagnosed without speculative fixes. No
+info-level logging on the success path — these only fire when
+something actually broke.
 
 ## Barrel handles subdirectories; rename overwrites Tinymist's partial edit
 

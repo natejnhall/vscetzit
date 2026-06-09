@@ -521,13 +521,6 @@ async function handleFigureRenames(
     const newFunc = sanitizeFuncName(path.basename(newUri.fsPath, ".typ"));
     const namesChanged = oldFunc !== newFunc;
 
-    // eslint-disable-next-line no-console
-    console.log(
-      `cetzit: figure rename ${oldUri.fsPath} → ${newUri.fsPath} ` +
-        `(${oldFunc} → ${newFunc}, namesChanged=${namesChanged}, ` +
-        `oldUnder=${oldUnder}, newUnder=${newUnder})`
-    );
-
     // Rewrite the in-file `#let` IFF the identifier changed and the file
     // still lives under the barrel tree. The path the file sits under is
     // irrelevant — what matters is that the identifier the file should
