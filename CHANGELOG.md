@@ -2,6 +2,62 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Barrel writes through the editor buffer; self-heal watcher catches drift
+
+> Subsequent attempts to rename don't yield a popup, but the
+> function import in the barrel file doesn't update, it says
+> `#import fig2.typ: fig1`. Your fix doesn't seem to be taking
+> effect. […]
+>
+> Here's what I think is going on: the barrel file isn't
+> updating if there is an unresolved import error in the file.
+> If I reload it from scratch, it generates the barrel file
+> perfectly. But if I rename a file, the barrel file updates the
+> function name within the file first, then the path second,
+> creating an unresolved import error, which then causes the
+> update to the function name not to take effect.
+
+The user's analysis was essentially correct, but the exact
+mechanism is buffer-vs-disk, not parse error: our regenerate was
+writing the new barrel via `vscode.workspace.fs.writeFile`, which
+updates the on-disk file but bypasses any open editor buffer. If
+the barrel was open, Tinymist's async "update imports on file
+rename" feature applied its (partial) edit to the buffer AFTER
+our disk write, leaving the buffer dirty with
+`#import "newname.typ": oldname`. VS Code then either auto-
+reloaded the disk content (good), prompted "file changed
+externally" (the user might "keep mine"), or held the dirty
+buffer until the user saved it — overwriting our correct disk
+content with Tinymist's stale binding.
+
+Two changes in `scaffold.ts`:
+
+**Write through `WorkspaceEdit`, not `fs.writeFile`.** Split
+`regenerateBarrelFile` into `buildBarrelContent` (pure: returns
+the expected string) and `applyBarrelContent` (handles the
+write). The apply path now opens the barrel as a
+`TextDocument`, applies a full-range `WorkspaceEdit.replace`,
+and saves. Falls back to `fs.writeFile` only if the document
+can't be opened. Skips the write entirely if the buffer already
+matches expected content — avoids triggering the self-heal
+watcher (below) for no-op writes.
+
+**Self-heal watcher.** New `onDidChangeTextDocument` listener
+that fires on any edit to the barrel buffer, debounces 400ms
+(both to collapse keystroke bursts and to give async LSP edits
+time to settle), then runs a structural drift check. The drift
+check parses every `#import "<path>": <binding>` line and
+compares the bindings against `sanitizeFuncName(basename(path,
+".typ"))` and the set of paths against `listFigureFiles`. Any
+mismatch triggers a regenerate. No loop risk — our regenerate
+produces drift-free content, so the next change event resolves
+to "no drift" and stops.
+
+The two together mean: any edit Tinymist (or anything else)
+makes to the barrel that leaves it inconsistent with the figures
+directory gets corrected within ~400ms, regardless of whether
+the edit went through the buffer or the disk.
+
 ## Mode switch clears selection; vertex mode supports drag-to-move
 
 > in the same way that switching modes should un-select the

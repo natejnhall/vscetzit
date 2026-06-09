@@ -316,20 +316,14 @@ async function listFigureFiles(barrel: vscode.Uri): Promise<string[]> {
   return out;
 }
 
-// Writes the barrel file based on whatever figures currently exist under
-// its directory (recursively). The barrel uses the same
-// name-from-basename convention as the figure emitter, so the imported
-// identifier always matches the figure's `#let <name>(...)` regardless of
-// which subdirectory the file sits in.
-//
-// Two files with the same basename in different subdirectories produce two
-// `#import` lines binding the same identifier — the second shadows the
-// first under Typst's normal scoping rules. We emit a `// WARNING:`
-// comment in the barrel when this happens so the user can rename one
-// rather than silently losing access.
-export async function regenerateBarrelFile(workspaceRoot: vscode.Uri): Promise<void> {
+// Builds the expected content of the barrel based on whatever figures
+// currently exist under its directory (recursively). Pure — no I/O
+// beyond the directory listing. Splitting build from write lets the
+// drift detector (below) compare the actual barrel against the
+// expected content without doing the write.
+async function buildBarrelContent(workspaceRoot: vscode.Uri): Promise<string | undefined> {
   const barrel = barrelUri(workspaceRoot);
-  if (!barrel) return;
+  if (!barrel) return undefined;
 
   const figures = await listFigureFiles(barrel);
 
@@ -374,12 +368,101 @@ export async function regenerateBarrelFile(workspaceRoot: vscode.Uri): Promise<v
     lines.push(`#import "${file}": ${funcName}`);
   }
 
-  const content = lines.join("\n") + "\n";
+  return lines.join("\n") + "\n";
+}
+
+// Writes `content` to the barrel. Prefers `WorkspaceEdit` over
+// `fs.writeFile` so the write composes with any open editor buffer on
+// the barrel — Tinymist's "update imports on file rename" feature can
+// otherwise apply a partial edit to the buffer AFTER our `fs.writeFile`
+// has updated only the disk, leaving the buffer (and the user's view)
+// stale until they save. `WorkspaceEdit` puts our content into the
+// buffer too, and we then save to persist.
+async function applyBarrelContent(barrel: vscode.Uri, content: string): Promise<void> {
+  let doc: vscode.TextDocument | undefined;
   try {
+    doc = await vscode.workspace.openTextDocument(barrel);
+  } catch {
+    // File doesn't exist (or failed to load). Fall back to direct write.
     await vscode.workspace.fs.writeFile(barrel, Buffer.from(content, "utf8"));
+    return;
+  }
+
+  // Skip the write if the content already matches — avoids triggering
+  // an `onDidChangeTextDocument` round-trip into the self-heal watcher.
+  if (doc.getText() === content) return;
+
+  const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length));
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(barrel, fullRange, content);
+  const applied = await vscode.workspace.applyEdit(edit);
+  if (!applied) {
+    await vscode.workspace.fs.writeFile(barrel, Buffer.from(content, "utf8"));
+    return;
+  }
+  if (doc.isDirty) {
+    try {
+      await doc.save();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`cetzit: failed to save ${barrel.fsPath}`, e);
+    }
+  }
+}
+
+export async function regenerateBarrelFile(workspaceRoot: vscode.Uri): Promise<void> {
+  const barrel = barrelUri(workspaceRoot);
+  if (!barrel) return;
+  const content = await buildBarrelContent(workspaceRoot);
+  if (content === undefined) return;
+  try {
+    await applyBarrelContent(barrel, content);
   } catch (e) {
     vscode.window.showErrorMessage(`cetzit: failed to regenerate barrel file — ${e}`);
   }
+}
+
+// Structural drift check: returns true if the barrel's current content
+// disagrees with what `regenerateBarrelFile` would produce. Used by the
+// self-heal watcher to catch post-write edits from Tinymist (or any
+// other tool) that leave the barrel partially correct.
+async function detectBarrelDrift(workspaceRoot: vscode.Uri): Promise<boolean> {
+  const barrel = barrelUri(workspaceRoot);
+  if (!barrel) return false;
+
+  let actual: string;
+  try {
+    const doc = await vscode.workspace.openTextDocument(barrel);
+    actual = doc.getText();
+  } catch {
+    return false;
+  }
+
+  const expected = await buildBarrelContent(workspaceRoot);
+  if (expected === undefined) return false;
+
+  // We compare structurally (parsing `#import` lines) rather than by
+  // raw string equality so the user can have stray whitespace / a
+  // missing trailing newline / extra blank lines without us reverting
+  // their formatting on every keystroke.
+  const importsOf = (content: string): Map<string, string> => {
+    const importRegex = /^#import\s+"([^"]+)":\s+(\S+)\s*$/gm;
+    const map = new Map<string, string>();
+    let m: RegExpExecArray | null;
+    while ((m = importRegex.exec(content)) !== null) {
+      map.set(m[1], m[2]);
+    }
+    return map;
+  };
+
+  const actualImports = importsOf(actual);
+  const expectedImports = importsOf(expected);
+
+  if (actualImports.size !== expectedImports.size) return true;
+  for (const [path, binding] of expectedImports) {
+    if (actualImports.get(path) !== binding) return true;
+  }
+  return false;
 }
 
 // Called from the figure editor on open. If the barrel feature is disabled
@@ -464,6 +547,51 @@ export function setupBarrelWatcher(context: vscode.ExtensionContext): void {
       void handleFigureRenames(event.files);
     })
   );
+
+  // Self-heal watcher: any edit to the barrel buffer (from us, from
+  // Tinymist's "update imports on rename", from a user hand-edit, etc.)
+  // triggers a debounced drift check. If the barrel's import lines
+  // don't match what `buildBarrelContent` would produce — e.g.
+  // Tinymist updated the path string but left the binding identifier
+  // stale (`#import "newname.typ": oldname`) — we regenerate to fix
+  // it. The debounce both collapses bursts of edits and gives async
+  // LSP edits a chance to settle before we react.
+  //
+  // No loop risk: our regenerate produces drift-free content, so the
+  // subsequent change event resolves the drift check to "no drift" and
+  // no further regeneration fires.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument(e => {
+      const ws = vscode.workspace.getWorkspaceFolder(e.document.uri);
+      if (!ws) return;
+      const barrel = barrelUri(ws.uri);
+      if (!barrel || e.document.uri.fsPath !== barrel.fsPath) return;
+      scheduleBarrelDriftCheck(ws.uri);
+    })
+  );
+}
+
+// Per-workspace debounced drift check. Lives next to
+// `scheduleBarrelRegenerate` conceptually but is a separate map so the
+// two debouncers don't clobber each other's timers.
+const pendingDriftChecks = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleBarrelDriftCheck(workspaceRoot: vscode.Uri, delayMs: number = 400): void {
+  const key = workspaceRoot.fsPath;
+  const existing = pendingDriftChecks.get(key);
+  if (existing) clearTimeout(existing);
+  const handle = setTimeout(async () => {
+    pendingDriftChecks.delete(key);
+    try {
+      if (await detectBarrelDrift(workspaceRoot)) {
+        await regenerateBarrelFile(workspaceRoot);
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("cetzit: barrel drift check failed", e);
+    }
+  }, delayMs);
+  pendingDriftChecks.set(key, handle);
 }
 
 // Escape a string for safe interpolation into a RegExp source.
