@@ -2,6 +2,40 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Mode switch clears selection; vertex mode supports drag-to-move
+
+> in the same way that switching modes should un-select the
+> control point interface, changing mode should also un-select any
+> currently selected vertices. Also, I should be able to
+> click-and-drag a node in vertex mode.
+
+**Mode switch clears selection.** The three handleCommand cases
+(`cetzit.gui.selectTool`, `nodeTool`, `edgeTool`) and the Toolbar
+`onToolChanged` callback in `FigureEditor` now call
+`updateSelection(new Set(), new Set())` after the `setTool` call.
+Smart-tool switches (right-click gestures that flip mode mid-
+gesture) bypass these code paths — they call `setTool` directly
+inside `handlePointerDown` — so transient mode flips during a
+gesture preserve selection. Only an explicit user-initiated mode
+change clears.
+
+**Vertex-mode drag.** Pointer-down on a node in vertex mode now
+sets `draggingNodes` and single-selects the node (mirroring select
+mode's drag setup). Pointer-move applies the translation in real
+time via `prevGraph.mapNodeData`. Pointer-up commits the move if
+there was movement, or single-selects the node if there wasn't
+(matching select-mode's no-movement-on-drag behaviour). The
+existing semantics are preserved otherwise:
+
+- Click on empty + no movement → place a new vertex (unchanged).
+- Click-drag on empty → no-op, same "user mistake" behaviour as
+  before.
+- Right-click on a node → smart-tool to edge mode (unchanged;
+  runs before the new vertex-mode branch).
+- Double-click on a node → label editor (unchanged; the new
+  single-click branch leaves the node selected so the double-
+  click handler still finds the right target).
+
 ## Rename robustness: popup queue, delayed regen, subdir invariance
 
 > The barrel file is not re-importing the functions and the listener

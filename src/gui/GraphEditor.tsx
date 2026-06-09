@@ -493,7 +493,17 @@ const GraphEditor = ({
 
         break;
       case "vertex":
-        // nothing to do
+        // Click-on-an-existing-node in vertex mode is now a drag setup,
+        // mirroring select mode's behaviour — pointer-up commits the
+        // drag, or single-selects the node if there was no movement. A
+        // click on empty space falls through unchanged; pointer-up will
+        // place a new vertex there.
+        if (clickedNode !== undefined) {
+          updateUIState({ prevGraph: graph, draggingNodes: true, mouseMoved: false });
+          if (!selectedNodes.has(clickedNode)) {
+            updateSelection(new Set([clickedNode]), new Set());
+          }
+        }
         break;
       case "edge":
         // Edge mode mirrors select-mode behaviour when the user clicks on an
@@ -590,7 +600,22 @@ const GraphEditor = ({
         }
         break;
       case "vertex":
-        // nothing to do
+        // Vertex mode now supports drag-to-move: if pointer-down landed on
+        // an existing node, translate the selected node(s) in real time.
+        // Drag on empty space stays a no-op (the new-vertex placement
+        // happens on pointer-up only when there was no movement).
+        if (uiState.draggingNodes && uiState.prevGraph !== undefined) {
+          const c1 = sceneCoords.coordFromScreen(uiState.mouseDownPos);
+          const c2 = sceneCoords.coordFromScreen(p);
+          const dx = Math.round((c2.x - c1.x) * 4) / 4;
+          const dy = Math.round((c2.y - c1.y) * 4) / 4;
+          updateGraph(
+            uiState.prevGraph.mapNodeData(d =>
+              selectedNodes.has(d.id) ? d.setCoord(d.coord.shift(dx, dy)) : d
+            ),
+            false
+          );
+        }
         break;
       case "edge":
         if (clickedControlPoint.current !== undefined) {
@@ -726,9 +751,10 @@ const GraphEditor = ({
         }
         break;
       case "vertex": {
-        // Double-click: the first click already placed a vertex (on its own
-        // pointer-up). On the second click, focus the label editor for the
-        // just-placed vertex instead of stacking a second one on top.
+        // Double-click: the first click already placed (or selected) a
+        // vertex on its own pointer-up. On the second click, focus the
+        // label editor for that vertex instead of stacking a second
+        // vertex on top.
         if (numClicks.current >= 2 && clickedNode !== undefined) {
           updateSelection(new Set([clickedNode]), new Set());
           toggleStylePanel(true);
@@ -740,10 +766,24 @@ const GraphEditor = ({
           break;
         }
 
-        // Click-and-drag in vertex mode is treated as a user mistake (they
-        // probably meant edge mode); do nothing on release. Right-click drag
-        // from a node still creates an edge via the smart-tool switch to the
-        // edge case, which fires before this branch runs.
+        // Drag of an existing node — either commit the move or, if there
+        // was no movement, just leave the node single-selected.
+        if (uiState.draggingNodes) {
+          if (!uiState.mouseMoved) {
+            if (clickedNode !== undefined) {
+              updateSelection(new Set([clickedNode]), new Set());
+            }
+          } else if (!uiState.prevGraph?.equals(graph)) {
+            updateGraph(graph, true);
+          }
+          break;
+        }
+
+        // Drag on empty canvas (no node under cursor) is treated as a
+        // user mistake — they probably meant edge mode. Do nothing on
+        // release. Right-click drag from a node still creates an edge
+        // via the smart-tool switch to the edge case, which fires
+        // before this branch runs.
         if (uiState.mouseMoved) {
           break;
         }
@@ -1078,20 +1118,28 @@ const GraphEditor = ({
       }
       case "cetzit.gui.selectTool": {
         setTool("select");
+        // Explicit mode change is a context reset — drop any current
+        // node / edge selection so leftover state from the prior mode
+        // doesn't bleed into the new one. Smart-tool switches (right-
+        // click gestures in handlePointerDown) bypass this code path,
+        // so transient mode flips during a gesture preserve selection.
+        if (selectedNodes.size > 0 || selectedEdges.size > 0) {
+          updateSelection(new Set(), new Set());
+        }
         break;
       }
       case "cetzit.gui.nodeTool": {
         setTool("vertex");
-        // Vertex mode has no control-point UI; if an edge was selected (its
-        // CPs were on screen), clear it so the canvas reverts to normal.
-        // Node selection is left intact.
-        if (selectedEdges.size > 0) {
-          updateSelection(selectedNodes, new Set());
+        if (selectedNodes.size > 0 || selectedEdges.size > 0) {
+          updateSelection(new Set(), new Set());
         }
         break;
       }
       case "cetzit.gui.edgeTool": {
         setTool("edge");
+        if (selectedNodes.size > 0 || selectedEdges.size > 0) {
+          updateSelection(new Set(), new Set());
+        }
         break;
       }
       case "cetzit.gui.viewTikzSource": {

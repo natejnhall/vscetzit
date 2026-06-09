@@ -271,6 +271,14 @@ const FigureEditor = ({ initialContent }: FigureEditorProps) => {
           <Toolbar
             tool={tool}
             onToolChanged={t => {
+              // Toolbar click is an explicit mode change; clear any
+              // current selection so leftover state from the previous
+              // mode doesn't bleed into the new one. Matches the same
+              // behaviour in GraphEditor's handleCommand for the
+              // keybinding-driven tool switches.
+              if (t !== tool) {
+                handleSelectionChanged(new Set(), new Set());
+              }
               setTool(t);
               document.getElementById("graph-editor")?.focus();
             }}
