@@ -2,6 +2,38 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Cmd-C/V/X work in the node-label input
+
+> I seem to be unable to copy and paste text in the label box
+> for a node. Why? And can you fix it?
+
+Root cause: VS Code intercepts cmd-C/V/X and routes them to the
+`cetzit.gui.copy/cut/paste` commands before the webview's input
+sees them. The when-clauses already guarded with `!inputFocus`,
+but `inputFocus` is a built-in context that only tracks focus
+inside VS Code's *own* inputs (not webview ones), so focusing
+the label input didn't disable the shortcuts.
+
+New plumbing:
+
+- `CetzitHost.setLabelFieldFocused(focused)` on the host
+  abstraction (no-op default; real impl in
+  `CetzitExtensionHost` posts a `setLabelFieldFocused` message).
+- `StylePanel.tsx`'s label `<input>` calls
+  `host.setLabelFieldFocused(true/false)` on focus / blur.
+- `editors.ts` handles the message by running
+  `vscode.commands.executeCommand("setContext",
+  "cetzit.labelFieldFocused", focused)`. The webview's
+  `onDidDispose` also resets the context to `false` in case the
+  blur event didn't fire before teardown.
+- All 38 `cetzit.gui.*` keybindings in `package.json` now have
+  `&& !cetzit.labelFieldFocused` appended to their `when`
+  clauses. While the label input is focused, VS Code skips all
+  cetzit shortcuts and the keystrokes fall through to the
+  browser's default text-editing behaviour — so cmd-C / cmd-V /
+  cmd-X / cmd-A / arrow keys all work as expected for editing
+  the label.
+
 ## Selected nodes render on top of unselected ones
 
 > It seems like newly pasted vertices (selected by default)

@@ -123,6 +123,19 @@ class BaseEditorProvider {
           vscode.commands.executeCommand("workbench.panel.markers.view.focus");
           return;
         }
+        case "setLabelFieldFocused": {
+          // The webview's node-label input has gained / lost focus.
+          // Mirror this to a VS Code context key so the cetzit.gui.*
+          // keybindings can be gated off while the user is typing —
+          // otherwise cmd-C/V/X get intercepted by VS Code and the
+          // input becomes effectively read-only for clipboard ops.
+          vscode.commands.executeCommand(
+            "setContext",
+            "cetzit.labelFieldFocused",
+            !!e.content
+          );
+          return;
+        }
       }
     });
 
@@ -130,6 +143,10 @@ class BaseEditorProvider {
       changeDocumentSubscription.dispose();
       BaseEditorProvider.openDocuments.delete(document);
       BaseEditorProvider.openPanels.delete(webviewPanel);
+      // The webview is gone before any blur event could fire — reset
+      // the context here so the gui.* keybindings re-enable everywhere
+      // else if a future editor opens.
+      vscode.commands.executeCommand("setContext", "cetzit.labelFieldFocused", false);
     });
   }
 

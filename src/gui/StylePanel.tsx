@@ -100,6 +100,13 @@ const StylePanel = ({
                   document.getElementById("graph-editor")?.focus();
                 }
               }}
+              // Tell the extension when this input has focus so it can
+              // disable the cetzit.gui.* keybindings (clipboard, select-
+              // all, etc.) — otherwise cmd-C/V/X are intercepted by
+              // VS Code and never reach the input for normal text
+              // editing. See `setLabelFieldFocused` on the host.
+              onFocus={() => host.setLabelFieldFocused(true)}
+              onBlur={() => host.setLabelFieldFocused(false)}
               disabled={currentNodeLabel === undefined}
               className={isValidDelimString("{" + currentNodeLabel + "}") ? "" : "error"}
             />
