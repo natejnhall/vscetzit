@@ -2,6 +2,28 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Selected nodes render on top of unselected ones
+
+> It seems like newly pasted vertices (selected by default)
+> aren't at the top layer. Clicking and dragging them moves the
+> vertex beneath, if one exists. Make it so that any time a
+> vertex is selected, it's on the top layer (if this is a
+> copy-paste specific bug then patch that instead).
+
+The `nodeLayer` `<g>` in `GraphEditor.tsx` rendered nodes in
+`graph.nodes` iteration order. SVG z-order is render order, so
+two nodes occupying the same spot competed by insertion order —
+a freshly pasted node (auto-selected) sitting on top of an
+existing one still passed clicks through to whichever happened
+to be later in `graph.nodes`.
+
+Fix: render unselected nodes first, then selected nodes. Two
+filtered `.map` passes inside the same `<g>` — keeps the layer
+structure intact, just splits the order so the selected subset
+always wins both visually and for pointer events. Not paste-
+specific: any selection (click, lasso, paste, post-undo
+restore) lifts the node to the top during the selection.
+
 ## Selection clear on vertex placement; cmd-Z restores selection
 
 > If a vertex or vertices are selected and a new vertex is placed,

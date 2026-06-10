@@ -1301,16 +1301,39 @@ const GraphEditor = ({
           ))}
         </g>
         <g id="nodeLayer">
-          {graph.nodes.map(data => (
-            <Node
-              key={data.id}
-              data={data}
-              tikzStyles={tikzStyles}
-              selected={selectedNodes.has(data.id)}
-              highlight={uiState.edgeStartNode === data.id || uiState.edgeEndNode === data.id}
-              sceneCoords={sceneCoords}
-            />
-          ))}
+          {/*
+            Render unselected nodes first, selected ones after — SVG z-order
+            is render order, so selected nodes end up visually on top and
+            also win pointer events against any unselected node beneath
+            them. Without this, a freshly pasted (and auto-selected) node
+            sitting on top of an existing node would still pass clicks
+            through to the underlying node because `graph.nodes` order
+            isn't selection-aware.
+          */}
+          {graph.nodes
+            .filter(data => !selectedNodes.has(data.id))
+            .map(data => (
+              <Node
+                key={data.id}
+                data={data}
+                tikzStyles={tikzStyles}
+                selected={false}
+                highlight={uiState.edgeStartNode === data.id || uiState.edgeEndNode === data.id}
+                sceneCoords={sceneCoords}
+              />
+            ))}
+          {graph.nodes
+            .filter(data => selectedNodes.has(data.id))
+            .map(data => (
+              <Node
+                key={data.id}
+                data={data}
+                tikzStyles={tikzStyles}
+                selected={true}
+                highlight={uiState.edgeStartNode === data.id || uiState.edgeEndNode === data.id}
+                sceneCoords={sceneCoords}
+              />
+            ))}
         </g>
         {/*
           Top-most layer for the bezier control-point handles of selected
