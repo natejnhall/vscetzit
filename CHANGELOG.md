@@ -2,6 +2,24 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## `stroke: 2pt` renders as black, not invisible
+
+> Setting a line style with `stroke: 2pt` creates an edge style
+> that the gui displays as invisible.
+
+`colorFromTypst` didn't recognise bare-length stroke shorthands.
+In Typst, `stroke: 2pt` means "a 2pt stroke at the default
+colour (black)" — but our parser fell through every branch and
+returned the literal string `"2pt"`. SVG treats that as an
+invalid stroke value and renders nothing, hence the
+disappearing edge.
+
+Added a length pattern check (`/^-?\d+(?:\.\d+)?\s*(?:pt|mm|cm|
+em|in|px)$/i`) right after the `X + Ypt` shorthand stripper. A
+match returns `"black"`, matching Typst's default. `black + 2pt`
+already worked because the `+` shorthand stripped to the colour
+side; this just fills in the bare-length gap.
+
 ## Cmd-C/V/X work in the node-label input
 
 > I seem to be unable to copy and paste text in the label box
