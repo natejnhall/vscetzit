@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext } from "preact/hooks";
+import { useState, useEffect, useContext, useRef } from "preact/hooks";
 
 import GraphEditor from "./GraphEditor";
 import { GraphTool } from "./GraphEditor";
@@ -42,6 +42,20 @@ const FigureEditor = ({ initialContent }: FigureEditorProps) => {
   const [selectedNodes, setSelectedNodes] = useState<Set<number>>(new Set());
   const [selectedEdges, setSelectedEdges] = useState<Set<number>>(new Set());
   const [showSecondPanel, setShowSecondPanel] = useState<boolean>(true);
+
+  // Selection-restoration history for VS Code's text-edit undo/redo. Each
+  // entry pairs a content string (the figure text the user would rewind
+  // TO) with the selection that was active at that moment — so when
+  // cmd-Z reverts the text and tryParseGraph fires with the matching
+  // content, we restore the selection. Capped so it can't grow without
+  // bound during long editing sessions.
+  type SelectionSnapshot = {
+    content: string;
+    selectedNodes: Set<number>;
+    selectedEdges: Set<number>;
+  };
+  const selectionHistory = useRef<SelectionSnapshot[]>([]);
+  const MAX_SELECTION_HISTORY = 50;
 
   const parsedStyles = parseStylesFile(initialContent.styles);
   const [tikzStyles, setTikzStyles] = useState<Styles>(
@@ -117,6 +131,32 @@ const FigureEditor = ({ initialContent }: FigureEditorProps) => {
       g.inheritDataFrom(graph);
       setEnabled(true);
       setGraph(g);
+
+      // If this content matches a snapshot in `selectionHistory`, the
+      // user just hit cmd-Z (or cmd-shift-Z) and we're rewinding to a
+      // prior state — restore the selection that was active at that
+      // state. Filtering against `g.hasNode`/`hasEdge` covers the edge
+      // case of a hand-edit that removed a node which was in the
+      // snapshot. We don't slice the history on match: keeping
+      // future-side entries lets cmd-Y reuse the same machinery.
+      const snap = selectionHistory.current.find(s => s.content === tikz);
+      if (snap) {
+        const restoredNodes = new Set(
+          Array.from(snap.selectedNodes).filter(id => g.hasNode(id))
+        );
+        const restoredEdges = new Set(
+          Array.from(snap.selectedEdges).filter(id => g.hasEdge(id))
+        );
+        setSelectedNodes(restoredNodes);
+        setSelectedEdges(restoredEdges);
+        if (restoredNodes.size === 1) {
+          const [n] = restoredNodes;
+          setCurrentNodeLabel(g.node(n)?.label);
+        } else {
+          setCurrentNodeLabel(undefined);
+        }
+        return;
+      }
 
       // update selection to remove any nodes/edges that no longer exist. n.b. we don't use handleSelectionChanged
       // as "setGraph" is async and hasn't updated the graph yet
@@ -228,6 +268,20 @@ const FigureEditor = ({ initialContent }: FigureEditorProps) => {
     setGraph(g);
 
     if (commit) {
+      // Snapshot the pre-change content + selection so that VS Code's
+      // text-edit undo also restores the selection that was active at
+      // this point. `graph` (closure) is the OLD graph state; serialising
+      // it yields the exact text the user would rewind to via cmd-Z.
+      const priorContent = graph.cetzit(funcName);
+      selectionHistory.current.push({
+        content: priorContent,
+        selectedNodes: new Set(selectedNodes),
+        selectedEdges: new Set(selectedEdges),
+      });
+      if (selectionHistory.current.length > MAX_SELECTION_HISTORY) {
+        selectionHistory.current.shift();
+      }
+
       const value = g.cetzit(funcName);
       updateFromGui(value);
     }

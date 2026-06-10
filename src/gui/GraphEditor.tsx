@@ -799,6 +799,15 @@ const GraphEditor = ({
         let k = graph.numNodes;
         while (existingNames.has(`n${k}`)) k++;
 
+        // Placing a new vertex clears the existing selection — otherwise a
+        // stale highlight from a previous interaction would linger on
+        // unrelated nodes. Cmd-Z restores the selection (and removes the
+        // new vertex) via the snapshot wired in FigureEditor's
+        // handleGraphChange.
+        if (selectedNodes.size > 0 || selectedEdges.size > 0) {
+          updateSelection(new Set(), new Set());
+        }
+
         const node = new NodeData()
           .setId(graph.freshNodeId)
           .setCoord(p1.snapToGrid(4))

@@ -2,6 +2,35 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Selection clear on vertex placement; cmd-Z restores selection
+
+> If a vertex or vertices are selected and a new vertex is placed,
+> the selected vertex should be de-selected. If the user then
+> presses cmd-z to undo placement, the vertex or vertices should
+> be re-selected so that the user doesn't have to redo it
+> manually.
+
+- `GraphEditor`: the vertex-mode placement branch now calls
+  `updateSelection(new Set(), new Set())` immediately before
+  `updateGraph(...)`. So the moment a new vertex appears, any
+  previously selected vertices/edges are cleared.
+- `FigureEditor`: new `selectionHistory` ref — a capped list of
+  `{ content, selectedNodes, selectedEdges }` snapshots. Every
+  commit (in `handleGraphChange`) pushes a snapshot pairing the
+  PRE-change figure text (i.e. the text the user would rewind to
+  via cmd-Z) with the selection that was active at that moment.
+- On every external update (`tryParseGraph` fires from a
+  cmd-Z/cmd-Y text-edit revert), we scan the history for a
+  content match. If found, we restore that snapshot's selection
+  (filtered against `g.hasNode`/`hasEdge` so a hand-edit
+  removing a node doesn't blow up). The history isn't sliced on
+  match — keeping future-side entries lets cmd-Y reuse the same
+  machinery to restore the post-redo selection.
+- Snapshot machinery is generic: any commit benefits, not just
+  vertex placement. Undoing a drag, a label edit, an edge add,
+  etc. all restore whatever selection was active right before
+  that change.
+
 ## Barrel writes through the editor buffer; self-heal watcher catches drift
 
 > Subsequent attempts to rename don't yield a popup, but the
