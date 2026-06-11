@@ -412,6 +412,11 @@ const GraphEditor = ({
     // pointer-move can compute the pan delta in viewport space. Diffing
     // in SVG-relative coords would be wrong: as we scroll, the SVG
     // itself shifts under the cursor, halving the apparent pan speed.
+    //
+    // Early-return so the per-tool pointer-down branch never runs —
+    // holding space is a clear "I want to pan" signal, and the current
+    // selection should be preserved verbatim (no node-single-select on
+    // click, no empty-canvas selection-clear, no rubber-band setup).
     if (event.button === 0 && spaceHeld.current) {
       const viewport = document.getElementById("graph-editor-viewport")!;
       updateUIState({
@@ -421,6 +426,7 @@ const GraphEditor = ({
         panStartClientX: event.clientX,
         panStartClientY: event.clientY,
       });
+      return;
     }
 
     let currentTool = tool;
@@ -686,12 +692,12 @@ const GraphEditor = ({
       d => Math.abs(d.coord.x - p1.x) < 0.22 && Math.abs(d.coord.y - p1.y) < 0.22
     )?.id;
 
-    // Space-pan release: skip the per-tool pointer-up logic entirely. The
-    // scroll has already happened in pointer-move; we just clean up. A
-    // space+click without movement (panMode set but mouseMoved false) is
-    // intentionally let through so the tool's normal click behaviour
-    // still runs — space is a transient modifier, not a mode switch.
-    if (uiState.panMode && uiState.mouseMoved) {
+    // Space-pan release: skip the per-tool pointer-up logic entirely.
+    // The scroll has already happened in pointer-move (or didn't, in
+    // the case of a space+click without drag — either way the user
+    // signalled pan intent by holding space, so the current selection
+    // should be preserved verbatim and no tool action should fire).
+    if (uiState.panMode) {
       if (uiState.smartTool) {
         setTool("select");
       }

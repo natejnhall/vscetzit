@@ -2,6 +2,25 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Space-drag pan preserves selection
+
+> spacebar-drag to pan should not de-select currently selected
+> vertices.
+
+Two one-line changes in `GraphEditor.tsx`.
+
+- Pointer-down: after setting `panMode` + `panStart*` for a
+  spaceHeld+click gesture, `return` immediately. Previously
+  execution fell through to the per-tool pointer-down branch,
+  which would single-select a clicked node in select mode (or
+  clear selection on empty), set up `draggingNodes`, etc. —
+  contradicting the pan intent.
+- Pointer-up: the existing pan-release branch was gated on
+  `panMode && uiState.mouseMoved`. Dropped the mouseMoved
+  predicate. A space+click without drag is still a pan gesture
+  from the user's POV (they held space, signalling pan intent);
+  cleaning up without running tool logic is correct.
+
 ## `stroke: 2pt` renders as black, not invisible
 
 > Setting a line style with `stroke: 2pt` creates an edge style
