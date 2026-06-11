@@ -49,6 +49,14 @@ export function colorFromTypst(expr: string | undefined): string | undefined {
     s = s.slice(0, plus).trim();
   }
 
+  // Bare-length stroke shorthand. In Typst `stroke: 2pt` means "use a
+  // 2pt stroke at the default color" — black. Without this check the
+  // function would fall through and return the literal `"2pt"` string,
+  // which SVG treats as an invalid stroke and renders as invisible.
+  if (/^-?\d+(?:\.\d+)?\s*(?:pt|mm|cm|em|in|px)$/i.test(s)) {
+    return "black";
+  }
+
   // Drop trailing color modifiers — we can't compute them on the canvas.
   s = s.replace(/\.(?:darken|lighten|transparentize|saturate|desaturate)\([^)]*\)$/, "");
 

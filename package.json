@@ -301,209 +301,209 @@
         "command": "cetzit.gui.cut",
         "key": "ctrl+x",
         "mac": "cmd+x",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.copy",
         "key": "ctrl+c",
         "mac": "cmd+c",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.paste",
         "key": "ctrl+v",
         "mac": "cmd+v",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.delete",
         "key": "delete",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.delete",
         "key": "backspace",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.moveLeft",
         "key": "ctrl+left",
         "mac": "cmd+shift+left",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.moveRight",
         "key": "ctrl+right",
         "mac": "cmd+shift+right",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.moveUp",
         "key": "ctrl+up",
         "mac": "cmd+shift+up",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.moveDown",
         "key": "ctrl+down",
         "mac": "cmd+shift+down",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.nudgeLeft",
         "key": "ctrl+shift+left",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.nudgeRight",
         "key": "ctrl+shift+right",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.nudgeUp",
         "key": "ctrl+shift+up",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.nudgeDown",
         "key": "ctrl+shift+down",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.joinPaths",
         "key": "ctrl+alt+p",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.splitPaths",
         "key": "ctrl+alt+shift+p",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.mergeNodes",
         "key": "ctrl+e",
         "mac": "cmd+e",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.reflectNodesHorizontally",
         "key": "alt+right",
         "mac": "alt+h",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.reflectNodesVertically",
         "key": "alt+down",
         "mac": "alt+v",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.reverseEdges",
         "key": "ctrl+/",
         "mac": "cmd+/",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.bringToFront",
         "key": "ctrl+]",
         "mac": "cmd+]",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.sendToBack",
         "key": "ctrl+[",
         "mac": "cmd+[",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.bringForward",
         "key": "ctrl+shift+]",
         "mac": "cmd+shift+]",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.sendBackward",
         "key": "ctrl+shift+[",
         "mac": "cmd+shift+[",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.selectAll",
         "key": "ctrl+a",
         "mac": "cmd+a",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.deselectAll",
         "key": "ctrl+d",
         "mac": "cmd+d",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.extendSelectionLeft",
         "key": "shift+left",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.extendSelectionRight",
         "key": "shift+right",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.extendSelectionUp",
         "key": "shift+up",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.extendSelectionDown",
         "key": "shift+down",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.selectTool",
         "key": "s",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.selectTool",
         "key": "escape",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.nodeTool",
-        "key": "n",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "key": "v",
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.edgeTool",
         "key": "e",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.viewTikzSource",
         "key": "ctrl+alt+t",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.toggleStylePanel",
         "key": "ctrl+alt+s",
         "mac": "cmd+option+s",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.zoomIn",
         "key": "=",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.zoomOut",
         "key": "-",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       },
       {
         "command": "cetzit.gui.centerViewport",
         "key": "0",
-        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus"
+        "when": "activeCustomEditorId == cetzit.figureEditor && !inputFocus && !editorTextFocus && !cetzit.labelFieldFocused"
       }
     ],
     "customEditors": [

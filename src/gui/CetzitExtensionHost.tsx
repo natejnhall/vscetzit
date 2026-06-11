@@ -109,6 +109,21 @@ class CetzitExtensionHost extends CetzitHost {
     });
   }
 
+  // Tells the extension whether keyboard focus is currently inside the
+  // node-label input field. The extension mirrors this to a VS Code
+  // `setContext` key (`cetzit.labelFieldFocused`) so the `gui.*` clipboard
+  // / selection / movement keybindings can be gated to skip when the user
+  // is typing in the label — otherwise VS Code intercepts cmd-C/V/X
+  // before the webview sees them and the input can't be edited normally.
+  // `inputFocus` (the built-in context) doesn't help here because it only
+  // tracks focus inside VS Code's own inputs, not webview ones.
+  public setLabelFieldFocused(focused: boolean) {
+    this.vscode.postMessage({
+      type: "setLabelFieldFocused",
+      content: focused,
+    });
+  }
+
   public renderFigureEditor(container: HTMLElement, initialContent: FigureEditorContent) {
     try {
       this.config = initialContent.config;

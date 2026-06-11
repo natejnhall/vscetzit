@@ -13,6 +13,10 @@ export default class CetzitHost {
   refreshTikzStyles(): void {}
   openTikzStyles(): void {}
   openCodeEditor(_position?: { line: number; column: number }): void {}
+  // Hooked from StylePanel's label-input focus/blur. The VS Code host
+  // mirrors this to a `setContext` key so the gui.* keybindings can
+  // disable themselves while the user is typing in the input.
+  setLabelFieldFocused(_focused: boolean): void {}
   getConfig(_key: string): any {
     return undefined;
   }

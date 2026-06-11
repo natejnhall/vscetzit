@@ -96,6 +96,10 @@ tackle them:
   edges currently run center-to-center via cetz auto-clipping.
 - Edge labels (`\draw (a) to node {$\phi$} (b);`-style) aren't supported
   yet — flag a TODO and emit a comment if you see them in legacy files.
+- TODO: document the math-macro scoping limitation — `#let`-defined math
+  bindings in main.typ aren't visible inside figure-file labels (Typst is
+  lexically scoped); use `styles.typ` (or another shared module imported
+  by both) as the home for shared `#let`s.
 
 ## Development notes
 

@@ -2,6 +2,492 @@
 
 Local prompt-based log of substantive changes to cetzit. Newest first.
 
+## Space-drag pan preserves selection
+
+> spacebar-drag to pan should not de-select currently selected
+> vertices.
+
+Two one-line changes in `GraphEditor.tsx`.
+
+- Pointer-down: after setting `panMode` + `panStart*` for a
+  spaceHeld+click gesture, `return` immediately. Previously
+  execution fell through to the per-tool pointer-down branch,
+  which would single-select a clicked node in select mode (or
+  clear selection on empty), set up `draggingNodes`, etc. —
+  contradicting the pan intent.
+- Pointer-up: the existing pan-release branch was gated on
+  `panMode && uiState.mouseMoved`. Dropped the mouseMoved
+  predicate. A space+click without drag is still a pan gesture
+  from the user's POV (they held space, signalling pan intent);
+  cleaning up without running tool logic is correct.
+
+## `stroke: 2pt` renders as black, not invisible
+
+> Setting a line style with `stroke: 2pt` creates an edge style
+> that the gui displays as invisible.
+
+`colorFromTypst` didn't recognise bare-length stroke shorthands.
+In Typst, `stroke: 2pt` means "a 2pt stroke at the default
+colour (black)" — but our parser fell through every branch and
+returned the literal string `"2pt"`. SVG treats that as an
+invalid stroke value and renders nothing, hence the
+disappearing edge.
+
+Added a length pattern check (`/^-?\d+(?:\.\d+)?\s*(?:pt|mm|cm|
+em|in|px)$/i`) right after the `X + Ypt` shorthand stripper. A
+match returns `"black"`, matching Typst's default. `black + 2pt`
+already worked because the `+` shorthand stripped to the colour
+side; this just fills in the bare-length gap.
+
+## Cmd-C/V/X work in the node-label input
+
+> I seem to be unable to copy and paste text in the label box
+> for a node. Why? And can you fix it?
+
+Root cause: VS Code intercepts cmd-C/V/X and routes them to the
+`cetzit.gui.copy/cut/paste` commands before the webview's input
+sees them. The when-clauses already guarded with `!inputFocus`,
+but `inputFocus` is a built-in context that only tracks focus
+inside VS Code's *own* inputs (not webview ones), so focusing
+the label input didn't disable the shortcuts.
+
+New plumbing:
+
+- `CetzitHost.setLabelFieldFocused(focused)` on the host
+  abstraction (no-op default; real impl in
+  `CetzitExtensionHost` posts a `setLabelFieldFocused` message).
+- `StylePanel.tsx`'s label `<input>` calls
+  `host.setLabelFieldFocused(true/false)` on focus / blur.
+- `editors.ts` handles the message by running
+  `vscode.commands.executeCommand("setContext",
+  "cetzit.labelFieldFocused", focused)`. The webview's
+  `onDidDispose` also resets the context to `false` in case the
+  blur event didn't fire before teardown.
+- All 38 `cetzit.gui.*` keybindings in `package.json` now have
+  `&& !cetzit.labelFieldFocused` appended to their `when`
+  clauses. While the label input is focused, VS Code skips all
+  cetzit shortcuts and the keystrokes fall through to the
+  browser's default text-editing behaviour — so cmd-C / cmd-V /
+  cmd-X / cmd-A / arrow keys all work as expected for editing
+  the label.
+
+## Selected nodes render on top of unselected ones
+
+> It seems like newly pasted vertices (selected by default)
+> aren't at the top layer. Clicking and dragging them moves the
+> vertex beneath, if one exists. Make it so that any time a
+> vertex is selected, it's on the top layer (if this is a
+> copy-paste specific bug then patch that instead).
+
+The `nodeLayer` `<g>` in `GraphEditor.tsx` rendered nodes in
+`graph.nodes` iteration order. SVG z-order is render order, so
+two nodes occupying the same spot competed by insertion order —
+a freshly pasted node (auto-selected) sitting on top of an
+existing one still passed clicks through to whichever happened
+to be later in `graph.nodes`.
+
+Fix: render unselected nodes first, then selected nodes. Two
+filtered `.map` passes inside the same `<g>` — keeps the layer
+structure intact, just splits the order so the selected subset
+always wins both visually and for pointer events. Not paste-
+specific: any selection (click, lasso, paste, post-undo
+restore) lifts the node to the top during the selection.
+
+## Selection clear on vertex placement; cmd-Z restores selection
+
+> If a vertex or vertices are selected and a new vertex is placed,
+> the selected vertex should be de-selected. If the user then
+> presses cmd-z to undo placement, the vertex or vertices should
+> be re-selected so that the user doesn't have to redo it
+> manually.
+
+- `GraphEditor`: the vertex-mode placement branch now calls
+  `updateSelection(new Set(), new Set())` immediately before
+  `updateGraph(...)`. So the moment a new vertex appears, any
+  previously selected vertices/edges are cleared.
+- `FigureEditor`: new `selectionHistory` ref — a capped list of
+  `{ content, selectedNodes, selectedEdges }` snapshots. Every
+  commit (in `handleGraphChange`) pushes a snapshot pairing the
+  PRE-change figure text (i.e. the text the user would rewind to
+  via cmd-Z) with the selection that was active at that moment.
+- On every external update (`tryParseGraph` fires from a
+  cmd-Z/cmd-Y text-edit revert), we scan the history for a
+  content match. If found, we restore that snapshot's selection
+  (filtered against `g.hasNode`/`hasEdge` so a hand-edit
+  removing a node doesn't blow up). The history isn't sliced on
+  match — keeping future-side entries lets cmd-Y reuse the same
+  machinery to restore the post-redo selection.
+- Snapshot machinery is generic: any commit benefits, not just
+  vertex placement. Undoing a drag, a label edit, an edge add,
+  etc. all restore whatever selection was active right before
+  that change.
+
+## Barrel writes through the editor buffer; self-heal watcher catches drift
+
+> Subsequent attempts to rename don't yield a popup, but the
+> function import in the barrel file doesn't update, it says
+> `#import fig2.typ: fig1`. Your fix doesn't seem to be taking
+> effect. […]
+>
+> Here's what I think is going on: the barrel file isn't
+> updating if there is an unresolved import error in the file.
+> If I reload it from scratch, it generates the barrel file
+> perfectly. But if I rename a file, the barrel file updates the
+> function name within the file first, then the path second,
+> creating an unresolved import error, which then causes the
+> update to the function name not to take effect.
+
+The user's analysis was essentially correct, but the exact
+mechanism is buffer-vs-disk, not parse error: our regenerate was
+writing the new barrel via `vscode.workspace.fs.writeFile`, which
+updates the on-disk file but bypasses any open editor buffer. If
+the barrel was open, Tinymist's async "update imports on file
+rename" feature applied its (partial) edit to the buffer AFTER
+our disk write, leaving the buffer dirty with
+`#import "newname.typ": oldname`. VS Code then either auto-
+reloaded the disk content (good), prompted "file changed
+externally" (the user might "keep mine"), or held the dirty
+buffer until the user saved it — overwriting our correct disk
+content with Tinymist's stale binding.
+
+Two changes in `scaffold.ts`:
+
+**Write through `WorkspaceEdit`, not `fs.writeFile`.** Split
+`regenerateBarrelFile` into `buildBarrelContent` (pure: returns
+the expected string) and `applyBarrelContent` (handles the
+write). The apply path now opens the barrel as a
+`TextDocument`, applies a full-range `WorkspaceEdit.replace`,
+and saves. Falls back to `fs.writeFile` only if the document
+can't be opened. Skips the write entirely if the buffer already
+matches expected content — avoids triggering the self-heal
+watcher (below) for no-op writes.
+
+**Self-heal watcher.** New `onDidChangeTextDocument` listener
+that fires on any edit to the barrel buffer, debounces 400ms
+(both to collapse keystroke bursts and to give async LSP edits
+time to settle), then runs a structural drift check. The drift
+check parses every `#import "<path>": <binding>` line and
+compares the bindings against `sanitizeFuncName(basename(path,
+".typ"))` and the set of paths against `listFigureFiles`. Any
+mismatch triggers a regenerate. No loop risk — our regenerate
+produces drift-free content, so the next change event resolves
+to "no drift" and stops.
+
+The two together mean: any edit Tinymist (or anything else)
+makes to the barrel that leaves it inconsistent with the figures
+directory gets corrected within ~400ms, regardless of whether
+the edit went through the buffer or the disk.
+
+## Mode switch clears selection; vertex mode supports drag-to-move
+
+> in the same way that switching modes should un-select the
+> control point interface, changing mode should also un-select any
+> currently selected vertices. Also, I should be able to
+> click-and-drag a node in vertex mode.
+
+**Mode switch clears selection.** The three handleCommand cases
+(`cetzit.gui.selectTool`, `nodeTool`, `edgeTool`) and the Toolbar
+`onToolChanged` callback in `FigureEditor` now call
+`updateSelection(new Set(), new Set())` after the `setTool` call.
+Smart-tool switches (right-click gestures that flip mode mid-
+gesture) bypass these code paths — they call `setTool` directly
+inside `handlePointerDown` — so transient mode flips during a
+gesture preserve selection. Only an explicit user-initiated mode
+change clears.
+
+**Vertex-mode drag.** Pointer-down on a node in vertex mode now
+sets `draggingNodes` and single-selects the node (mirroring select
+mode's drag setup). Pointer-move applies the translation in real
+time via `prevGraph.mapNodeData`. Pointer-up commits the move if
+there was movement, or single-selects the node if there wasn't
+(matching select-mode's no-movement-on-drag behaviour). The
+existing semantics are preserved otherwise:
+
+- Click on empty + no movement → place a new vertex (unchanged).
+- Click-drag on empty → no-op, same "user mistake" behaviour as
+  before.
+- Right-click on a node → smart-tool to edge mode (unchanged;
+  runs before the new vertex-mode branch).
+- Double-click on a node → label editor (unchanged; the new
+  single-click branch leaves the node selected so the double-
+  click handler still finds the right target).
+
+## Rename robustness: popup queue, delayed regen, subdir invariance
+
+> The barrel file is not re-importing the functions and the listener
+> is not renaming the functions within the files themselves if the
+> rename happens within a subdirectory. […] Renaming functionality
+> should happen identically regardless of which subdirectory I am
+> in. […] When a file rename occurs, provide the popup. There also
+> seems to be an issue with the popup in that if I rename a
+> different file before dealing with the first popup, the popup
+> gets overwritten and I lose the opportunity to rename instances
+> of the function use in the main document. Fix this too — have
+> popups persist.
+
+Three pieces, all in `scaffold.ts`.
+
+**Popup queue.** VS Code's `showInformationMessage` nominally
+persists until clicked, but only ONE toast is visible at the
+bottom-right at a time — newer toasts push older ones into the
+(easily-missed) notification centre, so a rapid sequence of
+renames looked like "the popup got overwritten" from the user's
+POV. New `enqueuePrompt(task)` chains every rename prompt onto a
+single `Promise` chain so each one awaits the previous before
+showing. Users see one popup at a time and can address each in
+order.
+
+**Delayed barrel regenerate to win the Tinymist race.** Tinymist's
+"update imports on file rename" LSP feature applies its edits
+asynchronously and can land AFTER our immediate regenerate,
+producing the half-applied `#import "newname.typ": oldname` line.
+New `scheduleBarrelRegenerate(workspaceRoot, 600ms)` debounces a
+deferred second write per workspace — by ~600ms later all LSP
+edits have settled, and the second regenerate overwrites them.
+Called from `handleFigureRenames` on every relevant rename, same
+code path regardless of subdirectory depth.
+
+**Error logging on failure paths.** `renameFunctionInFigure` now
+emits a `console.warn` when its `#let <oldFunc>(` regex doesn't
+match the file content (the rewrite is silently skipped, which
+otherwise looks like the handler ran but nothing changed) and
+`console.error` when `openTextDocument` / `applyEdit` / `save`
+throw. These surface in the webview devtools console (Help →
+Toggle Developer Tools in the host window) so legitimate
+failures can be diagnosed without speculative fixes. No
+info-level logging on the success path — these only fire when
+something actually broke.
+
+## Barrel handles subdirectories; rename overwrites Tinymist's partial edit
+
+> I'd also like the barrel file to handle subdirectories well.
+> Currently, if I move a file to a subdirectory, the barrel file
+> handles it as a name change and it appears to work. But there
+> seems to be an issue saving the result, since I think the
+> listener for the barrel file doesn't scan the subdirectory and
+> so there's a mismatch between the file contents and what the
+> listener considers to be in the directory. Also, you fixed the
+> function name to be updated within the file itself, but the
+> import still isn't working in the barrel file. `#import
+> "oldname.typ": oldname` becomes `#import "newname.typ": oldname`.
+
+Two bugs, related.
+
+**Subdirectory support.**
+- `listFigureFiles` rewritten to walk the barrel's directory
+  recursively. Returns relative paths with POSIX `/` separators
+  (Typst's `#import` expects forward slashes regardless of host
+  OS). Skips any file or directory whose name starts with `_` or
+  `.` (tooling files like `_all.typ` and dot-dirs like `.git`).
+  Result is sorted for stable diffs.
+- The watcher's "is this file in the barrel dir?" check changed
+  from `path.dirname === barrelDir` to a new `isUnderDir` helper
+  that handles arbitrary nesting. Same exclusion for
+  underscore/dot segments is applied so the watcher doesn't
+  re-fire when a tooling file gets touched deep in a subdir.
+- `regenerateBarrelFile` now derives the import binding from
+  `path.posix.basename(rel, ".typ")` so a file at
+  `figures/sub/foo.typ` still surfaces as `#import "sub/foo.typ":
+  foo` — the user can call `#foo()` regardless of the path.
+- Basename collisions across subdirs are detected: if two paths
+  resolve to the same identifier, the barrel emits a
+  `// WARNING:` comment listing the conflicting paths and
+  explaining that Typst shadows earlier imports with later ones.
+  We still emit every import line; the user picks the winner by
+  renaming.
+
+**Binding-name not updating on rename.**
+- Root cause: Tinymist has a "update imports on file rename"
+  LSP feature that rewrites the path string in importing files
+  when a target gets renamed. It correctly updates the path
+  (`"oldname.typ"` → `"newname.typ"`) but doesn't know about our
+  barrel convention that the binding identifier should also
+  match, so it leaves `: oldname` in place — producing
+  `#import "newname.typ": oldname`, which is broken. Our
+  filesystem watcher *should* have raced and overwritten that
+  with a fresh regeneration, but with renames going through
+  VS Code's UI the filesystem-level delete+create can be
+  suppressed in favour of `onDidRenameFiles` alone.
+- Fix: `handleFigureRenames` now explicitly calls
+  `regenerateBarrelFile` after handling the in-file `#let`
+  rewrite. This runs on every figure rename — including pure
+  relocations into/within subdirs — and always overwrites any
+  partial edit Tinymist may have applied.
+- The handler also accepts a wider class of renames now:
+  basename change, directory move within the tree, and
+  move-in/move-out of the barrel dir. The in-file rewrite and
+  usage prompt only fire when the basename (i.e. the identifier)
+  actually changed AND the file still lives under the barrel
+  tree; everything else is a pure path change covered by the
+  barrel regeneration alone.
+
+## Renaming a figure file updates its in-file function name
+
+> If I rename a file (say, fig1.typ becomes fig3.typ) I want the
+> function in the file to be updated accordingly. The barrel file
+> updates the name of the file already, but not the function name.
+> Change this too. Don't have the extension change the main
+> document, but maybe add a popup asking if the user wants to
+> change instances of fig1() to fig3().
+
+- New `vscode.workspace.onDidRenameFiles` listener wired in
+  `setupBarrelWatcher`. Only handles renames that BOTH start and
+  end inside the barrel's directory and skips the barrel itself
+  plus any underscore-prefixed file (tooling files like `_all.typ`
+  are not figures).
+- `renameFunctionInFigure` rewrites the `#let <oldFunc>(...)`
+  line in the renamed file using a regex anchored on `#let` +
+  whitespace + the exact identifier + `(`, so a stray comment or
+  string containing the name isn't accidentally rewritten. Edit
+  is applied via `WorkspaceEdit` + `applyEdit` so it composes
+  with any open custom editor on the file, then saved.
+- `maybePromptRenameUsages` scans the workspace for identifier-
+  bounded `oldFunc` occurrences in all other `.typ` files
+  (skipping the renamed file and the auto-regenerated barrel),
+  collects ranges, and pops a "Replace N uses across M files? /
+  Cancel" non-modal info message. On Replace, all hits are
+  rewritten in a single `WorkspaceEdit` and saved. Identifier
+  boundary uses `(?<![a-zA-Z0-9_-])` lookaround instead of `\b`
+  because hyphens are valid in Typst identifiers but break `\b`.
+- The user is never silently refactored — the file rename
+  triggers ONE auto-edit (the figure's own `#let` line) and an
+  optional opt-in for everything else.
+- External renames (e.g. `mv` from a terminal) only trigger the
+  filesystem watcher's delete+create pair, not the rename event;
+  the barrel will regenerate but the in-file function stays
+  stale. Tolerable for v1 — covers the common case of renaming
+  in VS Code's explorer.
+
+## Tighten double-click window from 400ms to 200ms
+
+> make the time between clicks required to count as a "double click"
+> shorter. Maybe cut it in half.
+
+- `numClicks.current` reset timer in `handlePointerUp` cut from
+  400ms to 200ms. Two intentionally separate clicks now have to
+  be much closer in time to be fused into a double-click; the
+  practical effect is that single-click actions (place vertex,
+  start edge) feel more responsive in their commit/finalise phase
+  because the editor isn't pessimistically waiting for a possible
+  second tap.
+
+## Canvas click after a label edit just commits the edit
+
+> new fix: if the label text box is currently selected (i.e. I just
+> finished typing a label) and I click on the canvas, nothing
+> should happen. (i.e. no matter which mode we are in, clicking off
+> of the label text box should behave as though we are in select
+> mode).
+
+- New `swallowGesture` ref in `GraphEditor`. At the top of
+  `handlePointerDown`, if `document.activeElement` is an
+  `HTMLInputElement`/`HTMLTextAreaElement`, the input is blurred,
+  focus is moved to the SVG, the ref is set, and we return early
+  — no `mouseDownPos`, no tool dispatch.
+- `handlePointerMove` and `handlePointerUp` both early-out on the
+  ref. Pointer-up also resets `numClicks.current = 0` and clears
+  the ref so the *next* canvas click (which now starts with the
+  SVG focused) gets the full tool treatment and isn't mis-counted
+  as the second tap of a double-click.
+- Why we needed this at all: pointer-down used to immediately call
+  `event.currentTarget.focus()`, which blurs the input — but it
+  did this in the same handler that goes on to place a vertex,
+  start an edge, toggle bezier mode, etc. So a click meant only
+  to leave the label field would simultaneously fire the active
+  tool. The check has to happen *before* the SVG-focus call,
+  since after it `document.activeElement` is already the SVG.
+
+## Empty click in edge mode closes the CP interface
+
+> I should also be able to empty click in edge mode while a control
+> point is selected and have the control point interface go away.
+
+- The edge-mode pointer-down's "else" branch (the catch-all that
+  fires when the click didn't land on an edge or a CP handle)
+  already cleared edge selection — but only when `clickedNode`
+  was defined, i.e. only when the user was starting a new edge
+  drag from a vertex. An empty-canvas click would also reach this
+  branch but the `clickedNode !== undefined` guard kept the edge
+  (and its CP overlay) selected.
+- Dropped the guard. Any click that reaches the else branch is
+  now a definite signal to deselect the current edge — either the
+  user is starting a new edge gesture or just clicking off the
+  current selection.
+
+## Lift edge control-point handles into a top-most SVG layer
+
+> It seems that if a label is in front of a control point thing on
+> an edge, the mouse will try to click the label rather than a
+> control point. When a control point interface is open, it should
+> be at the highest click priority (at the "top level").
+
+- Root cause: the draggable CP handle circles were rendered inside
+  the `Edge` component, which sits in `edgeLayer`. `nodeLayer`
+  renders after `edgeLayer`, so any node-label bounding box that
+  overlapped a CP would intercept its click. SVG z-order is render
+  order — the only fix is to render the handles later.
+- Extracted the two handle circles into a new
+  `EdgeControlHandles.tsx` component that re-runs
+  `computeControlPoints` (one extra pure compute per selected edge —
+  negligible) and emits just the two interactive circles.
+- Added a new `<g id="controlPointLayer">` in `GraphEditor.tsx`
+  that's rendered AFTER `nodeLayer`, iterates selected edges, and
+  renders an `EdgeControlHandles` for each. Pointer-down on a
+  handle still bubbles up to the SVG's master handler with
+  `clickedControlPoint.current` set, so the existing
+  drag/double-click logic is unchanged.
+- Removed `onControlPointPointerDown` from `Edge`'s props and the
+  now-dead handle-circle block from `Edge.tsx`. The cosmetic guide
+  pieces (dashed radius circles + tangent lines) stay inside `Edge`
+  since they already have `pointerEvents: none` and don't block
+  anything regardless of layer.
+
+## Spacebar + drag pans the canvas (and the half-speed bug)
+
+> The trackpad is great, add shift and drag as well for pan.
+>
+> The dragging is quite jittery and doesnt seem to be moving as fast
+> as my mouse, only half the distance. Is it only checking and
+> updating half as often as the rest of the program?
+>
+> Also, upon second thought, since shift-click does something
+> already, switch the gesture to spacebar-drag. Maybe this will also
+> fix the problem.
+
+- First pass used shift+drag and computed the pan delta in the
+  SVG-relative coordinate system returned by `mousePositionToCoord`.
+  That coordinate moves with the SVG: when we set `scrollLeft -= 50`,
+  the SVG shifts +50 in viewport coords, so the *next* mouse event at
+  the same screen position produces a `p` that already drifted by 50.
+  Diffing that against the captured `mouseDownPos` under-counted the
+  cursor delta by exactly the amount we'd just scrolled —
+  algebraically a 1:0.5 feedback ratio, which matches the "half
+  distance" symptom. The "jitter" is the same recurrence: the
+  recurrence δₙ + δₙ₋₁ = −Mₙ alternates each event between catching
+  up and stalling.
+- Fix: diff in viewport-absolute coordinates. Pointer-down now stores
+  `panStartClientX`/`panStartClientY` alongside the scroll offset,
+  and pointer-move computes `event.clientX - panStartClientX`
+  directly. `clientX`/`clientY` don't shift with our own scroll, so
+  the delta is the true cursor motion.
+- Switched the modifier from shift to spacebar. Shift+click is
+  already overloaded by every tool (multi-select toggle, endpoint
+  stickiness, etc.) so making it also a pan modifier was conflicting
+  with the existing gestures.
+- New `spaceHeld` ref in `GraphEditor`, plus a `useEffect` that
+  registers window keydown/keyup for `code === "Space"`. The
+  keydown is gated on the graph-editor element (or a descendant)
+  being the active element so pressing space while typing in the
+  style-panel label field still inserts a literal space.
+  preventDefault on keydown avoids the webview scrolling.
+- Pointer-down: `event.button === 0 && spaceHeld.current` enters
+  pan mode and stamps the four start values. Pointer-move:
+  early-out with the viewport-coord scroll update. Pointer-up:
+  early-out only if `mouseMoved` was set — a space+click without
+  drag still falls through to the tool's normal click semantics.
+- The rubber-band setup in the select-tool's empty-click branch is
+  suppressed when space is held, so the two gestures can't overlap.
+
 ## Exclude underscore-prefixed `.typ` files from the figure editor glob
 
 > Make sure `_all.typ` (and any other tooling-managed file with a
